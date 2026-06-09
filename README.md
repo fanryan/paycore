@@ -30,7 +30,9 @@ Current development stage:
 - Request ID middleware implemented
 - Structured JSON request logging implemented
 - JSON error response shape introduced
+- Configuration loading implemented for environment, HTTP address, and server timeouts
 - HTTP API foundation tests added
+- Configuration tests added
 
 Implemented endpoints:
 
@@ -58,6 +60,15 @@ Override the address:
 PAYCORE_HTTP_ADDR=:9090 go run ./cmd/paycore-api
 ```
 
+Supported local configuration:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `PAYCORE_ENV` | `local` | Runtime environment label used in startup logs |
+| `PAYCORE_HTTP_ADDR` | `:8080` | HTTP listen address |
+| `PAYCORE_HTTP_READ_HEADER_TIMEOUT_SECONDS` | `5` | HTTP read header timeout in seconds |
+| `PAYCORE_HTTP_SHUTDOWN_TIMEOUT_SECONDS` | `10` | Graceful shutdown timeout in seconds |
+
 Test the current endpoints:
 
 ```bash
@@ -82,6 +93,9 @@ paycore/
     paycore-api/
       main.go
   internal/
+    config/
+      config.go
+      config_test.go
     httpapi/
       middleware.go
       router.go

@@ -15,6 +15,29 @@ Redis is used for fast admission control and response caching, but correctness m
 
 Kafka is used to publish payment lifecycle events to downstream systems such as LedgerFlow.
 
+## Current Implementation
+
+The current repository contains the first API foundation:
+
+- Go HTTP API entrypoint at `cmd/paycore-api`.
+- Health endpoint: `GET /healthz`.
+- Readiness endpoint: `GET /readyz`.
+- Version endpoint: `GET /version`.
+- Request ID middleware using `X-Request-ID`.
+- Structured JSON request logging.
+- Structured JSON error response shape.
+- Configuration loading from environment variables.
+- Unit tests for HTTP routing and configuration loading.
+
+Current supported configuration:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `PAYCORE_ENV` | `local` | Runtime environment label used in startup logs |
+| `PAYCORE_HTTP_ADDR` | `:8080` | HTTP listen address |
+| `PAYCORE_HTTP_READ_HEADER_TIMEOUT_SECONDS` | `5` | HTTP read header timeout in seconds |
+| `PAYCORE_HTTP_SHUTDOWN_TIMEOUT_SECONDS` | `10` | Graceful shutdown timeout in seconds |
+
 ## High-Level Flow
 
 ```text

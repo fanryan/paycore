@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"time"
 
+	"github.com/fanryan/paycore/internal/config"
 	"github.com/fanryan/paycore/internal/httpapi"
 )
 
@@ -19,25 +20,30 @@ const (
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-
-	addr := getenv("PAYCORE_HTTP_ADDR", ":8080")
+	cfg := config.Load()
 
 	server := &http.Server{
-		Addr: addr,
+		Addr: cfg.HTTPAddr,
 		Handler: httpapi.NewRouter(httpapi.RouterConfig{
 			ServiceName: serviceName,
 			Version:     version,
 			StartedAt:   time.Now().UTC(),
 			Logger:      logger,
 		}),
-		ReadHeaderTimeout: 5 * time.Second,
+		ReadHeaderTimeout: cfg.HTTPReadHeaderTimeout,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
 	go func() {
-		logger.Info("paycore api starting", "addr", addr)
+		logger.Info(
+			"paycore api starting",
+			"env", cfg.Env,
+			"addr", cfg.HTTPAddr,
+			"read_header_timeout", cfg.HTTPReadHeaderTimeout.String(),
+			"shutdown_timeout", cfg.HTTPShutdownTimeout.String(),
+		)
 
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("paycore api stopped unexpectedly", "error", err)
@@ -47,7 +53,7 @@ func main() {
 
 	<-ctx.Done()
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.HTTPShutdownTimeout)
 	defer cancel()
 
 	logger.Info("paycore api shutting down")
@@ -58,13 +64,4 @@ func main() {
 	}
 
 	logger.Info("paycore api stopped")
-}
-
-func getenv(key string, fallback string) string {
-	value := os.Getenv(key)
-	if value == "" {
-		return fallback
-	}
-
-	return value
 }
