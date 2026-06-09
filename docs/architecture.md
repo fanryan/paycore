@@ -31,16 +31,3 @@ Client
 ## Durability Rule
 
 Redis may improve latency, but PostgreSQL remains authoritative for payment state, payer balances, idempotency records, settlement records, and outbox events.
-
-Then verify:
-
-```bash
-go test ./...
-git status --short
-```
-Expected result for go test ./... right now is likely:
-
-```text
-go: warning: "./..." matched no packages
-no packages to test
-```
