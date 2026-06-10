@@ -76,6 +76,43 @@ func TestPayerServiceGetsAndListsPayers(t *testing.T) {
 	}
 }
 
+func TestPayerServiceUpdatesPayer(t *testing.T) {
+	ctx := context.Background()
+	service := payer.NewPayerService(memory.NewStore())
+
+	created, err := service.CreatePayer(ctx, payer.CreatePayerInput{
+		ID:                    "payer-1",
+		AvailableBalanceMinor: 10_000,
+		Currency:              "USD",
+	})
+	if err != nil {
+		t.Fatalf("expected payer create to succeed, got error: %v", err)
+	}
+
+	reserved, err := created.Reserve(4_000, "USD", created.UpdatedAt.Add(1))
+	if err != nil {
+		t.Fatalf("expected reserve to succeed, got error: %v", err)
+	}
+
+	updated, err := service.UpdatePayer(ctx, reserved)
+	if err != nil {
+		t.Fatalf("expected payer update to succeed, got error: %v", err)
+	}
+
+	if updated.AvailableBalanceMinor != 6_000 {
+		t.Fatalf("expected available balance 6000, got %d", updated.AvailableBalanceMinor)
+	}
+
+	got, err := service.GetPayer(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("expected payer get to succeed, got error: %v", err)
+	}
+
+	if got.HeldBalanceMinor != 4_000 {
+		t.Fatalf("expected held balance 4000, got %d", got.HeldBalanceMinor)
+	}
+}
+
 func TestPayerServiceReturnsRepositoryErrors(t *testing.T) {
 	service := payer.NewPayerService(memory.NewStore())
 

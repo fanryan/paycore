@@ -58,3 +58,71 @@ func (p Payer) CanAuthorize(amountMinor int64, currency string) bool {
 
 	return p.AvailableBalanceMinor >= amountMinor
 }
+
+func (p Payer) Reserve(amountMinor int64, currency string, now time.Time) (Payer, error) {
+	if amountMinor <= 0 {
+		return Payer{}, errors.New("reserve amount must be positive")
+	}
+
+	if p.Currency != currencycode.NormalizeCurrency(currency) {
+		return Payer{}, errors.New("reserve currency does not match payer currency")
+	}
+
+	if p.AvailableBalanceMinor < amountMinor {
+		return Payer{}, errors.New("insufficient available balance")
+	}
+
+	now = now.UTC()
+
+	p.AvailableBalanceMinor -= amountMinor
+	p.HeldBalanceMinor += amountMinor
+	p.Version++
+	p.UpdatedAt = now
+
+	return p, nil
+}
+
+func (p Payer) Release(amountMinor int64, currency string, now time.Time) (Payer, error) {
+	if amountMinor <= 0 {
+		return Payer{}, errors.New("release amount must be positive")
+	}
+
+	if p.Currency != currencycode.NormalizeCurrency(currency) {
+		return Payer{}, errors.New("release currency does not match payer currency")
+	}
+
+	if p.HeldBalanceMinor < amountMinor {
+		return Payer{}, errors.New("insufficient held balance")
+	}
+
+	now = now.UTC()
+
+	p.AvailableBalanceMinor += amountMinor
+	p.HeldBalanceMinor -= amountMinor
+	p.Version++
+	p.UpdatedAt = now
+
+	return p, nil
+}
+
+func (p Payer) CaptureHeld(amountMinor int64, currency string, now time.Time) (Payer, error) {
+	if amountMinor <= 0 {
+		return Payer{}, errors.New("capture amount must be positive")
+	}
+
+	if p.Currency != currencycode.NormalizeCurrency(currency) {
+		return Payer{}, errors.New("capture currency does not match payer currency")
+	}
+
+	if p.HeldBalanceMinor < amountMinor {
+		return Payer{}, errors.New("insufficient held balance")
+	}
+
+	now = now.UTC()
+
+	p.HeldBalanceMinor -= amountMinor
+	p.Version++
+	p.UpdatedAt = now
+
+	return p, nil
+}

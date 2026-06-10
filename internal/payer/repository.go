@@ -14,4 +14,5 @@ type PayerRepository interface {
 	CreatePayer(ctx context.Context, payer Payer) (Payer, error)
 	GetPayer(ctx context.Context, payerID string) (Payer, error)
 	ListPayers(ctx context.Context) ([]Payer, error)
+	UpdatePayer(ctx context.Context, payer Payer) (Payer, error)
 }

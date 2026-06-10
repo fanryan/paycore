@@ -36,7 +36,11 @@ Current development stage:
 - Payer entity, service, repository interface, and in-memory adapter implemented
 - Merchant HTTP create and list endpoints implemented
 - Payer HTTP create and list endpoints implemented
+- Payer balance reservation, release, and held-capture behavior implemented
+- Payment entity, authorization hold entity, repository interface, and in-memory adapter implemented
+- Local payment authorization service implemented without HTTP exposure yet
 - Shared currency normalization and validation implemented
+- Shared random id helper implemented
 - HTTP API foundation tests added
 - Configuration tests added
 - Merchant and payer unit tests added
@@ -54,7 +58,9 @@ POST /payers
 GET /payers
 ```
 
-Infrastructure such as PostgreSQL, Redis, Kafka, Prometheus, Docker Compose, payment endpoints, settlement processing, and outbox publishing has not been implemented yet.
+Infrastructure such as PostgreSQL, Redis, Kafka, Prometheus, Docker Compose, payment HTTP endpoints, settlement processing, and outbox publishing has not been implemented yet.
+
+Payment authorization currently exists as an internal service only. It is not exposed as `POST /payments/authorize` yet.
 
 ## Run Locally
 
@@ -138,6 +144,14 @@ paycore/
       adapters/
         memory/
           repository.go
+    payment/
+      entity.go
+      hold.go
+      repository.go
+      service.go
+      adapters/
+        memory/
+          repository.go
     shared/
       config/
         config.go
@@ -145,10 +159,15 @@ paycore/
       currency/
         currency.go
         currency_test.go
+      httpjson/
+        response.go
+      id/
+        id.go
   docs/
     architecture.md
     merchant.md
     payer.md
+    payment.md
   go.mod
   README.md
 ```
@@ -231,6 +250,7 @@ Current documentation:
 - `docs/architecture.md`
 - `docs/merchant.md`
 - `docs/payer.md`
+- `docs/payment.md`
 
 Planned documentation:
 

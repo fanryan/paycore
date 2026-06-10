@@ -33,6 +33,10 @@ The current repository contains the first API foundation:
 - Payer entity, service, repository interface, and in-memory adapter.
 - Merchant and payer HTTP handlers.
 - Merchant and payer routes composed through `internal/http`.
+- Payer balance mutation methods for reserve, release, and held capture.
+- Payment entity, authorization hold entity, repository interface, in-memory adapter, and authorization service.
+- Shared HTTP JSON response helper.
+- Shared random id helper.
 - Unit tests for HTTP routing, configuration loading, currency helpers, merchant behavior, and payer behavior.
 
 Current supported configuration:
@@ -78,11 +82,20 @@ internal/merchant
 internal/payer
   -> payer entity, service, repository interface, memory adapter
 
+internal/payment
+  -> payment entity, hold entity, authorization service, repository interface, memory adapter
+
 internal/shared/config
   -> environment-backed application configuration
 
 internal/shared/currency
   -> currency normalization and validation helpers
+
+internal/shared/httpjson
+  -> shared JSON response writer
+
+internal/shared/id
+  -> random local id generation
 ```
 
 Feature packages own their local entity, service, repository interface, and adapters. The `internal/http` package wires feature handlers into one HTTP entrypoint as handlers are introduced.
@@ -112,3 +125,26 @@ internal/http.Router
 ```
 
 Merchant and payer handlers currently use in-memory repositories. Their state is not durable and is reset when the API process restarts.
+
+## Current Payment Authorization Flow
+
+Payment authorization currently exists as an internal service, not as an HTTP endpoint.
+
+```text
+Caller
+  |
+  v
+Payment Service
+  |
+  +--> load merchant
+  +--> verify merchant can create payments
+  +--> load payer
+  +--> verify currency and available balance
+  +--> generate payment id and hold id
+  +--> create authorization hold
+  +--> create AUTHORIZED payment
+  +--> reserve payer balance
+  +--> persist payer, hold, and payment in memory
+```
+
+Because this is still in-memory, this flow is not transactionally durable. PostgreSQL will later make payer balance mutation, hold creation, payment creation, idempotency, and outbox event creation part of one transaction.

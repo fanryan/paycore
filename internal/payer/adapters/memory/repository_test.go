@@ -78,6 +78,47 @@ func TestStoreListsPayers(t *testing.T) {
 	}
 }
 
+func TestStoreUpdatesPayer(t *testing.T) {
+	ctx := context.Background()
+	store := NewStore()
+	payerRecord := testPayer(t, "payer-1")
+
+	if _, err := store.CreatePayer(ctx, payerRecord); err != nil {
+		t.Fatalf("expected payer create to succeed, got error: %v", err)
+	}
+
+	reserved, err := payerRecord.Reserve(4_000, "USD", testNow().Add(time.Minute))
+	if err != nil {
+		t.Fatalf("expected reserve to succeed, got error: %v", err)
+	}
+
+	updated, err := store.UpdatePayer(ctx, reserved)
+	if err != nil {
+		t.Fatalf("expected payer update to succeed, got error: %v", err)
+	}
+
+	if updated.AvailableBalanceMinor != 6_000 {
+		t.Fatalf("expected available balance 6000, got %d", updated.AvailableBalanceMinor)
+	}
+
+	got, err := store.GetPayer(ctx, "payer-1")
+	if err != nil {
+		t.Fatalf("expected payer get to succeed, got error: %v", err)
+	}
+
+	if got.HeldBalanceMinor != 4_000 {
+		t.Fatalf("expected held balance 4000, got %d", got.HeldBalanceMinor)
+	}
+}
+
+func TestStoreReturnsPayerNotFoundOnUpdate(t *testing.T) {
+	_, err := NewStore().UpdatePayer(context.Background(), testPayer(t, "missing"))
+
+	if !errors.Is(err, payer.ErrPayerNotFound) {
+		t.Fatalf("expected ErrPayerNotFound, got %v", err)
+	}
+}
+
 func TestStoreReturnsContextErrorForPayerRepository(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -97,6 +138,11 @@ func TestStoreReturnsContextErrorForPayerRepository(t *testing.T) {
 	_, err = store.ListPayers(ctx)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context canceled from list payers, got %v", err)
+	}
+
+	_, err = store.UpdatePayer(ctx, testPayer(t, "payer-1"))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled from update payer, got %v", err)
 	}
 }
 

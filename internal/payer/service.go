@@ -39,3 +39,7 @@ func (s *PayerService) GetPayer(ctx context.Context, payerID string) (Payer, err
 func (s *PayerService) ListPayers(ctx context.Context) ([]Payer, error) {
 	return s.payers.ListPayers(ctx)
 }
+
+func (s *PayerService) UpdatePayer(ctx context.Context, payer Payer) (Payer, error) {
+	return s.payers.UpdatePayer(ctx, payer)
+}

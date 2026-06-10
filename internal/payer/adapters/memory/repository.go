@@ -66,3 +66,20 @@ func (s *Store) ListPayers(ctx context.Context) ([]payer.Payer, error) {
 
 	return payers, nil
 }
+
+func (s *Store) UpdatePayer(ctx context.Context, payerRecord payer.Payer) (payer.Payer, error) {
+	if err := ctx.Err(); err != nil {
+		return payer.Payer{}, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, exists := s.payers[payerRecord.ID]; !exists {
+		return payer.Payer{}, payer.ErrPayerNotFound
+	}
+
+	s.payers[payerRecord.ID] = payerRecord
+
+	return payerRecord, nil
+}
