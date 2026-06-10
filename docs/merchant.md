@@ -11,6 +11,7 @@ The Go API currently supports the merchant foundation:
 - Merchant entity in `internal/merchant/entity.go`.
 - Merchant repository interface in `internal/merchant/repository.go`.
 - Merchant service in `internal/merchant/service.go`.
+- Merchant HTTP handler in `internal/merchant/handler.go`.
 - In-memory merchant repository adapter in `internal/merchant/adapters/memory/repository.go`.
 - Merchant statuses:
   - `ACTIVE`
@@ -23,15 +24,13 @@ The Go API currently supports the merchant foundation:
 - Settlement currency validation as a 3-letter currency code.
 - `Merchant.CanCreatePayments()` guard for payment creation eligibility.
 - Repository errors for not-found and duplicate merchant records.
-- Entity, service, and in-memory repository tests.
+- Merchant create and list routes composed through `internal/http/router.go`.
+- Entity, service, handler, router, and in-memory repository tests.
 
 ### Not Implemented Yet
 
 These are planned but not currently implemented:
 
-- Merchant HTTP handler.
-- Merchant routes in `internal/http/router.go`.
-- Public or protected merchant API endpoints.
 - PostgreSQL merchant repository.
 - Merchant database migrations.
 - Merchant authentication and authorization rules.
@@ -41,14 +40,12 @@ These are planned but not currently implemented:
 
 ### Public Endpoints
 
-None currently.
-
-The only public API endpoints today are system endpoints:
-
 ```text
 GET /healthz
 GET /readyz
 GET /version
+POST /merchants
+GET  /merchants
 ```
 
 ### Protected Endpoints
@@ -89,7 +86,7 @@ main()
   +--> starts net/http server
 ```
 
-Merchant dependencies are not wired into `main.go` yet because merchant HTTP endpoints have not been introduced.
+Merchant dependencies are wired in `main.go` with the in-memory repository adapter.
 
 ### Merchant Package Boundary
 
@@ -101,11 +98,12 @@ internal/merchant
   +--> entity.go
   +--> repository.go
   +--> service.go
+  +--> handler.go
   |
   +--> adapters/memory/repository.go
 ```
 
-The feature package owns merchant rules. The HTTP package will only compose the merchant handler once it exists.
+The feature package owns merchant rules and HTTP request/response mapping. The central HTTP package composes the merchant handler into the shared router.
 
 ## 3. Create Merchant Service Flow
 
@@ -177,7 +175,7 @@ ErrDuplicateMerchant
 ErrMerchantNotFound
 ```
 
-HTTP error mapping has not been implemented yet. Planned mapping:
+Current HTTP error mapping:
 
 ```text
 validation error       -> HTTP 400
@@ -185,19 +183,18 @@ ErrDuplicateMerchant   -> HTTP 409
 ErrMerchantNotFound    -> HTTP 404
 ```
 
-## 4. Planned Merchant HTTP Flow
+## 4. Merchant HTTP Flow
 
-This section is a placeholder for the upcoming handler implementation.
-
-Planned endpoint:
+Current endpoints:
 
 ```text
 POST /merchants
 GET  /merchants
-GET  /merchants/{merchant_id}
 ```
 
-Planned handler flow:
+`GET /merchants/{merchant_id}` is planned but not implemented.
+
+Handler flow:
 
 ```text
 Client
@@ -218,13 +215,13 @@ merchant.Handler
 JSON response
 ```
 
-The handler should live in:
+The handler lives in:
 
 ```text
 internal/merchant/handler.go
 ```
 
-The router should only register it. Business rules should stay in the merchant entity and service.
+The router only registers it. Business rules stay in the merchant entity and service.
 
 ## 5. Persistence
 
@@ -272,6 +269,9 @@ Current tests cover:
 - repository not-found behavior
 - in-memory duplicate detection
 - in-memory context cancellation behavior
+- handler create/list behavior
+- handler invalid JSON and duplicate error mapping
+- router-level `/merchants` wiring
 
 Run:
 
@@ -299,7 +299,7 @@ Provides the current non-durable in-memory repository implementation.
 
 `internal/merchant/handler.go`
 
-Planned. Will own merchant HTTP request parsing, response mapping, and HTTP error mapping.
+Owns merchant HTTP request parsing, response mapping, and HTTP error mapping.
 
 `internal/merchant/adapters/postgres/repository.go`
 
@@ -307,9 +307,9 @@ Planned. Will own durable PostgreSQL merchant persistence.
 
 ## Checklist
 
-- [ ] Add merchant HTTP handler.
-- [ ] Register merchant routes in `internal/http/router.go`.
-- [ ] Add merchant handler tests.
+- [x] Add merchant HTTP handler.
+- [x] Register merchant routes in `internal/http/router.go`.
+- [x] Add merchant handler tests.
 - [ ] Add PostgreSQL migration for merchants.
 - [ ] Add PostgreSQL merchant repository.
 - [ ] Document final merchant request and response contracts.

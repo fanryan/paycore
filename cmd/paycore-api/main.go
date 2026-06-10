@@ -10,6 +10,10 @@ import (
 	"time"
 
 	httpapi "github.com/fanryan/paycore/internal/http"
+	"github.com/fanryan/paycore/internal/merchant"
+	merchantmemory "github.com/fanryan/paycore/internal/merchant/adapters/memory"
+	"github.com/fanryan/paycore/internal/payer"
+	payermemory "github.com/fanryan/paycore/internal/payer/adapters/memory"
 	"github.com/fanryan/paycore/internal/shared/config"
 )
 
@@ -22,13 +26,23 @@ func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	cfg := config.Load()
 
+	merchantRepository := merchantmemory.NewStore()
+	merchantService := merchant.NewMerchantService(merchantRepository)
+	merchantHandler := merchant.NewHandler(merchantService)
+
+	payerRepository := payermemory.NewStore()
+	payerService := payer.NewPayerService(payerRepository)
+	payerHandler := payer.NewHandler(payerService)
+
 	server := &http.Server{
 		Addr: cfg.HTTPAddr,
 		Handler: httpapi.NewRouter(httpapi.RouterConfig{
-			ServiceName: serviceName,
-			Version:     version,
-			StartedAt:   time.Now().UTC(),
-			Logger:      logger,
+			ServiceName:     serviceName,
+			Version:         version,
+			StartedAt:       time.Now().UTC(),
+			Logger:          logger,
+			MerchantHandler: merchantHandler,
+			PayerHandler:    payerHandler,
 		}),
 		ReadHeaderTimeout: cfg.HTTPReadHeaderTimeout,
 	}

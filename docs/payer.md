@@ -11,6 +11,7 @@ The Go API currently supports the payer foundation:
 - Payer entity in `internal/payer/entity.go`.
 - Payer repository interface in `internal/payer/repository.go`.
 - Payer service in `internal/payer/service.go`.
+- Payer HTTP handler in `internal/payer/handler.go`.
 - In-memory payer repository adapter in `internal/payer/adapters/memory/repository.go`.
 - Available balance stored as integer minor units.
 - Held balance stored as integer minor units.
@@ -22,15 +23,13 @@ The Go API currently supports the payer foundation:
 - Currency validation as a 3-letter currency code.
 - `Payer.CanAuthorize(...)` predicate for amount, currency, and available balance checks.
 - Repository errors for not-found and duplicate payer records.
-- Entity and service tests.
+- Payer create and list routes composed through `internal/http/router.go`.
+- Entity, service, handler, router, and in-memory repository tests.
 
 ### Not Implemented Yet
 
 These are planned but not currently implemented:
 
-- Payer HTTP handler.
-- Payer routes in `internal/http/router.go`.
-- Public or protected payer API endpoints.
 - PostgreSQL payer repository.
 - Payer database migrations.
 - Optimistic concurrency enforcement in durable persistence.
@@ -42,14 +41,12 @@ These are planned but not currently implemented:
 
 ### Public Endpoints
 
-None currently.
-
-The only public API endpoints today are system endpoints:
-
 ```text
 GET /healthz
 GET /readyz
 GET /version
+POST /payers
+GET  /payers
 ```
 
 ### Protected Endpoints
@@ -90,7 +87,7 @@ main()
   +--> starts net/http server
 ```
 
-Payer dependencies are not wired into `main.go` yet because payer HTTP endpoints have not been introduced.
+Payer dependencies are wired in `main.go` with the in-memory repository adapter.
 
 ### Payer Package Boundary
 
@@ -102,11 +99,12 @@ internal/payer
   +--> entity.go
   +--> repository.go
   +--> service.go
+  +--> handler.go
   |
   +--> adapters/memory/repository.go
 ```
 
-The feature package owns payer rules. The HTTP package will only compose the payer handler once it exists.
+The feature package owns payer rules and HTTP request/response mapping. The central HTTP package composes the payer handler into the shared router.
 
 ## 3. Create Payer Service Flow
 
@@ -180,7 +178,7 @@ ErrDuplicatePayer
 ErrPayerNotFound
 ```
 
-HTTP error mapping has not been implemented yet. Planned mapping:
+Current HTTP error mapping:
 
 ```text
 validation error    -> HTTP 400
@@ -216,19 +214,18 @@ true or false
 
 This is not a complete payment authorization workflow yet. The future authorization flow will also create a payment, create a hold, mutate available and held balances, persist idempotency state, and write an outbox event.
 
-## 5. Planned Payer HTTP Flow
+## 5. Payer HTTP Flow
 
-This section is a placeholder for the upcoming handler implementation.
-
-Planned endpoint:
+Current endpoints:
 
 ```text
 POST /payers
 GET  /payers
-GET  /payers/{payer_id}
 ```
 
-Planned handler flow:
+`GET /payers/{payer_id}` is planned but not implemented.
+
+Handler flow:
 
 ```text
 Client
@@ -249,13 +246,13 @@ payer.Handler
 JSON response
 ```
 
-The handler should live in:
+The handler lives in:
 
 ```text
 internal/payer/handler.go
 ```
 
-The router should only register it. Business rules should stay in the payer entity and service.
+The router only registers it. Business rules stay in the payer entity and service.
 
 ## 6. Persistence
 
@@ -304,6 +301,11 @@ Current tests cover:
 - authorization predicate behavior
 - service create/get/list behavior
 - repository not-found behavior
+- in-memory duplicate detection
+- in-memory context cancellation behavior
+- handler create/list behavior
+- handler invalid JSON and duplicate error mapping
+- router-level `/payers` wiring
 
 Run:
 
@@ -331,7 +333,7 @@ Provides the current non-durable in-memory repository implementation.
 
 `internal/payer/handler.go`
 
-Planned. Will own payer HTTP request parsing, response mapping, and HTTP error mapping.
+Owns payer HTTP request parsing, response mapping, and HTTP error mapping.
 
 `internal/payer/adapters/postgres/repository.go`
 
@@ -339,9 +341,9 @@ Planned. Will own durable PostgreSQL payer persistence and optimistic concurrenc
 
 ## Checklist
 
-- [ ] Add payer HTTP handler.
-- [ ] Register payer routes in `internal/http/router.go`.
-- [ ] Add payer handler tests.
+- [x] Add payer HTTP handler.
+- [x] Register payer routes in `internal/http/router.go`.
+- [x] Add payer handler tests.
 - [ ] Add PostgreSQL migration for payers.
 - [ ] Add PostgreSQL payer repository.
 - [ ] Implement durable optimistic concurrency for balance mutation.

@@ -8,10 +8,12 @@ import (
 )
 
 type RouterConfig struct {
-	ServiceName string
-	Version     string
-	StartedAt   time.Time
-	Logger      *slog.Logger
+	ServiceName     string
+	Version         string
+	StartedAt       time.Time
+	Logger          *slog.Logger
+	MerchantHandler http.Handler
+	PayerHandler    http.Handler
 }
 
 type ErrorResponse struct {
@@ -31,6 +33,15 @@ func NewRouter(config RouterConfig) http.Handler {
 	mux.HandleFunc("GET /healthz", healthHandler)
 	mux.HandleFunc("GET /readyz", readyHandler)
 	mux.HandleFunc("GET /version", versionHandler(config))
+
+	if config.MerchantHandler != nil {
+		mux.Handle("/merchants", config.MerchantHandler)
+	}
+
+	if config.PayerHandler != nil {
+		mux.Handle("/payers", config.PayerHandler)
+	}
+
 	mux.HandleFunc("/", notFoundHandler)
 
 	return requestIDMiddleware(

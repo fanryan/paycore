@@ -34,10 +34,13 @@ Current development stage:
 - Feature-first package layout introduced for merchant and payer modules
 - Merchant entity, service, repository interface, and in-memory adapter implemented
 - Payer entity, service, repository interface, and in-memory adapter implemented
+- Merchant HTTP create and list endpoints implemented
+- Payer HTTP create and list endpoints implemented
 - Shared currency normalization and validation implemented
 - HTTP API foundation tests added
 - Configuration tests added
 - Merchant and payer unit tests added
+- Merchant and payer handler tests added
 
 Implemented endpoints:
 
@@ -45,11 +48,13 @@ Implemented endpoints:
 GET /healthz
 GET /readyz
 GET /version
+POST /merchants
+GET /merchants
+POST /payers
+GET /payers
 ```
 
 Infrastructure such as PostgreSQL, Redis, Kafka, Prometheus, Docker Compose, payment endpoints, settlement processing, and outbox publishing has not been implemented yet.
-
-Merchant and payer HTTP endpoints have not been exposed yet. Their entity, service, repository interface, and memory adapter foundations exist for the upcoming API slice.
 
 ## Run Locally
 
@@ -84,6 +89,18 @@ curl http://localhost:8080/readyz
 curl http://localhost:8080/version
 ```
 
+Create local in-memory records:
+
+```bash
+curl -i -X POST http://localhost:8080/merchants \
+  -H 'Content-Type: application/json' \
+  -d '{"id":"merchant-1","name":"Demo Merchant","settlement_currency":"usd"}'
+
+curl -i -X POST http://localhost:8080/payers \
+  -H 'Content-Type: application/json' \
+  -d '{"id":"payer-1","available_balance_minor":10000,"currency":"usd"}'
+```
+
 ## Test
 
 Run all tests:
@@ -107,6 +124,7 @@ paycore/
       system_handler.go
     merchant/
       entity.go
+      handler.go
       repository.go
       service.go
       adapters/
@@ -114,6 +132,7 @@ paycore/
           repository.go
     payer/
       entity.go
+      handler.go
       repository.go
       service.go
       adapters/

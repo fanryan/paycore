@@ -31,6 +31,8 @@ The current repository contains the first API foundation:
 - Shared currency normalization and validation.
 - Merchant entity, service, repository interface, and in-memory adapter.
 - Payer entity, service, repository interface, and in-memory adapter.
+- Merchant and payer HTTP handlers.
+- Merchant and payer routes composed through `internal/http`.
 - Unit tests for HTTP routing, configuration loading, currency helpers, merchant behavior, and payer behavior.
 
 Current supported configuration:
@@ -103,6 +105,10 @@ internal/http.Router
   +--> GET /healthz
   +--> GET /readyz
   +--> GET /version
+  +--> POST /merchants
+  +--> GET /merchants
+  +--> POST /payers
+  +--> GET /payers
 ```
 
-Merchant and payer services are implemented but not yet exposed through HTTP handlers.
+Merchant and payer handlers currently use in-memory repositories. Their state is not durable and is reset when the API process restarts.

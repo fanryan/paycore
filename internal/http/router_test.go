@@ -1,12 +1,18 @@
 package http
 
 import (
+	"bytes"
 	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/fanryan/paycore/internal/merchant"
+	merchantmemory "github.com/fanryan/paycore/internal/merchant/adapters/memory"
+	"github.com/fanryan/paycore/internal/payer"
+	payermemory "github.com/fanryan/paycore/internal/payer/adapters/memory"
 )
 
 func TestHealthEndpoint(t *testing.T) {
@@ -133,6 +139,88 @@ func TestRequestIDHeaderIsPreserved(t *testing.T) {
 
 	if got := response.Header().Get("X-Request-ID"); got != "test-request-id" {
 		t.Fatalf("expected X-Request-ID to be preserved, got %q", got)
+	}
+}
+
+func TestMerchantRouteIsWired(t *testing.T) {
+	merchantRepository := merchantmemory.NewStore()
+	merchantService := merchant.NewMerchantService(merchantRepository)
+	merchantHandler := merchant.NewHandler(merchantService)
+
+	router := NewRouter(RouterConfig{
+		ServiceName:     "paycore-api",
+		Version:         "test",
+		StartedAt:       time.Date(2026, 6, 6, 12, 0, 0, 0, time.UTC),
+		Logger:          slog.Default(),
+		MerchantHandler: merchantHandler,
+	})
+
+	request := httptest.NewRequest(http.MethodPost, "/merchants", bytes.NewBufferString(`{
+		"id": "merchant-1",
+		"name": "Demo Merchant",
+		"settlement_currency": "usd"
+	}`))
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d", http.StatusCreated, response.Code)
+	}
+
+	assertHeaderExists(t, response, "X-Request-ID")
+	assertJSONContentType(t, response)
+
+	var body merchant.MerchantResponse
+	decodeJSON(t, response, &body)
+
+	if body.ID != "merchant-1" {
+		t.Fatalf("expected merchant id merchant-1, got %q", body.ID)
+	}
+
+	if body.SettlementCurrency != "USD" {
+		t.Fatalf("expected settlement currency USD, got %q", body.SettlementCurrency)
+	}
+}
+
+func TestPayerRouteIsWired(t *testing.T) {
+	payerRepository := payermemory.NewStore()
+	payerService := payer.NewPayerService(payerRepository)
+	payerHandler := payer.NewHandler(payerService)
+
+	router := NewRouter(RouterConfig{
+		ServiceName:  "paycore-api",
+		Version:      "test",
+		StartedAt:    time.Date(2026, 6, 6, 12, 0, 0, 0, time.UTC),
+		Logger:       slog.Default(),
+		PayerHandler: payerHandler,
+	})
+
+	request := httptest.NewRequest(http.MethodPost, "/payers", bytes.NewBufferString(`{
+		"id": "payer-1",
+		"available_balance_minor": 10000,
+		"currency": "usd"
+	}`))
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d", http.StatusCreated, response.Code)
+	}
+
+	assertHeaderExists(t, response, "X-Request-ID")
+	assertJSONContentType(t, response)
+
+	var body payer.PayerResponse
+	decodeJSON(t, response, &body)
+
+	if body.ID != "payer-1" {
+		t.Fatalf("expected payer id payer-1, got %q", body.ID)
+	}
+
+	if body.Currency != "USD" {
+		t.Fatalf("expected currency USD, got %q", body.Currency)
 	}
 }
 
