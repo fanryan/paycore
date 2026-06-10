@@ -198,40 +198,92 @@ There should be:
 - One Markdown file per major system design or feature.
 - `README.md` for current status, run commands, current repo shape, and high-level target architecture.
 
-Feature docs should focus on what exists today, not only future plans.
+Feature docs should follow the style of `/Users/fan/ledgerflow/docs/authentication.md`: explain the current implementation as it exists today, write for resume/interview review, and include explicit placeholders for planned sections that are not implemented yet.
 
 Preferred feature-doc sections:
 
 ```md
 # Feature Name
 
-Short paragraph explaining the current implementation and why it matters.
+This document explains the current PayCore <feature> implementation as it exists today. It is written for resume and interview preparation, so it focuses on how the code works, what decisions were made, and what is still planned.
 
-## 1. Current Scope
+## 1. Current Feature Scope
 
 ### Implemented
 
-- Concrete implemented items.
+- Concrete implemented items with file paths, endpoint names, status values, tables, and tests where applicable.
 
 ### Not Implemented Yet
 
-- Planned but not implemented items.
+- Planned but not implemented items. Be explicit when a handler, route, adapter, migration, or external dependency does not exist yet.
 
 ### Public Endpoints
 
-List public endpoints, or say none.
+List public endpoints, or say none currently.
 
-### Protected Endpoints
+### Protected Endpoints Or Protected By Default
 
-List protected endpoints and required headers.
+List protected endpoints and required headers, or say auth is not implemented yet.
 
 ## 2. Runtime Flow
 
-Explain startup or request flow with a text diagram.
+### App Startup
 
-## 3. Endpoint Or Core Flow
+Show the command and entrypoint.
 
-Show request, response, step-by-step behavior, and a diagram.
+```bash
+go run ./cmd/paycore-api
+```
+
+```text
+go run ./cmd/paycore-api
+  |
+  v
+main()
+  |
+  +--> loads shared config
+  +--> creates logger
+  +--> wires dependencies
+  +--> creates internal/http router
+  +--> starts net/http server
+```
+
+### Feature Package Boundary
+
+Explain which package owns the feature and how it relates to `internal/http`.
+
+```text
+internal/<feature>
+  |
+  +--> entity.go
+  +--> repository.go
+  +--> service.go
+  +--> handler.go when implemented
+  |
+  +--> adapters/<adapter>/repository.go
+```
+
+## 3. Main Feature Flow
+
+### Request Or Service Input
+
+If HTTP exists, show the request. If HTTP does not exist yet, show the current service input and say no HTTP contract exists yet.
+
+### Step-by-Step
+
+Use numbered steps from handler/service entry to repository/database/output.
+
+### Diagram
+
+Use a plain text flow diagram.
+
+### Failure Path
+
+List domain/service/repository errors and current or planned HTTP mappings.
+
+## 4. Additional Flow Or Planned HTTP Flow
+
+Add secondary flows where relevant, such as refresh, reverse, capture, settlement, replay, authorization checks, or planned handler flow.
 
 ## Validation And Errors
 
@@ -243,14 +295,18 @@ Describe tables, important columns, constraints, and indexes once they exist.
 
 ## Tests
 
-List test coverage and how to run it.
+List current test coverage and command to run it.
 
 ## File Guide
 
-Explain which files own controller, service, repository, model, migration, and tests.
+Explain which files own handler/controller, service, repository, model/entity, adapter, migration, and tests.
+
+## Checklist
+
+End with a concise checklist for planned next work.
 ```
 
-Not every doc needs every section, but keep the structure recognizable.
+Not every doc needs every section, but keep the structure recognizable. If something is not implemented, include a clearly labeled placeholder instead of pretending it exists.
 
 ## Architecture Tradeoff Doc Style
 

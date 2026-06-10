@@ -23,11 +23,15 @@ The current repository contains the first API foundation:
 - Health endpoint: `GET /healthz`.
 - Readiness endpoint: `GET /readyz`.
 - Version endpoint: `GET /version`.
+- Central HTTP composition package at `internal/http`.
 - Request ID middleware using `X-Request-ID`.
 - Structured JSON request logging.
 - Structured JSON error response shape.
 - Configuration loading from environment variables.
-- Unit tests for HTTP routing and configuration loading.
+- Shared currency normalization and validation.
+- Merchant entity, service, repository interface, and in-memory adapter.
+- Payer entity, service, repository interface, and in-memory adapter.
+- Unit tests for HTTP routing, configuration loading, currency helpers, merchant behavior, and payer behavior.
 
 Current supported configuration:
 
@@ -54,3 +58,51 @@ Client
 ## Durability Rule
 
 Redis may improve latency, but PostgreSQL remains authoritative for payment state, payer balances, idempotency records, settlement records, and outbox events.
+
+## Package Layout
+
+PayCore currently uses a feature-first internal package layout with a central HTTP composition root.
+
+```text
+cmd/paycore-api
+  -> bootstraps config, logger, HTTP server, and dependencies
+
+internal/http
+  -> router, middleware, system endpoints, shared HTTP response helpers
+
+internal/merchant
+  -> merchant entity, service, repository interface, memory adapter
+
+internal/payer
+  -> payer entity, service, repository interface, memory adapter
+
+internal/shared/config
+  -> environment-backed application configuration
+
+internal/shared/currency
+  -> currency normalization and validation helpers
+```
+
+Feature packages own their local entity, service, repository interface, and adapters. The `internal/http` package wires feature handlers into one HTTP entrypoint as handlers are introduced.
+
+Business rules should stay in feature entities and services. Middleware should stay limited to cross-cutting HTTP behavior such as request IDs, logging, recovery, authentication, rate limiting, CORS, and body size limits.
+
+## Current Request Flow
+
+Current system endpoints flow through the central HTTP package:
+
+```text
+Client
+  |
+  v
+internal/http.Router
+  |
+  +--> request ID middleware
+  +--> logging middleware
+  |
+  +--> GET /healthz
+  +--> GET /readyz
+  +--> GET /version
+```
+
+Merchant and payer services are implemented but not yet exposed through HTTP handlers.

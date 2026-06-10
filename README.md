@@ -31,8 +31,13 @@ Current development stage:
 - Structured JSON request logging implemented
 - JSON error response shape introduced
 - Configuration loading implemented for environment, HTTP address, and server timeouts
+- Feature-first package layout introduced for merchant and payer modules
+- Merchant entity, service, repository interface, and in-memory adapter implemented
+- Payer entity, service, repository interface, and in-memory adapter implemented
+- Shared currency normalization and validation implemented
 - HTTP API foundation tests added
 - Configuration tests added
+- Merchant and payer unit tests added
 
 Implemented endpoints:
 
@@ -43,6 +48,8 @@ GET /version
 ```
 
 Infrastructure such as PostgreSQL, Redis, Kafka, Prometheus, Docker Compose, payment endpoints, settlement processing, and outbox publishing has not been implemented yet.
+
+Merchant and payer HTTP endpoints have not been exposed yet. Their entity, service, repository interface, and memory adapter foundations exist for the upcoming API slice.
 
 ## Run Locally
 
@@ -93,15 +100,36 @@ paycore/
     paycore-api/
       main.go
   internal/
-    config/
-      config.go
-      config_test.go
-    httpapi/
+    http/
       middleware.go
       router.go
       router_test.go
+      system_handler.go
+    merchant/
+      entity.go
+      repository.go
+      service.go
+      adapters/
+        memory/
+          repository.go
+    payer/
+      entity.go
+      repository.go
+      service.go
+      adapters/
+        memory/
+          repository.go
+    shared/
+      config/
+        config.go
+        config_test.go
+      currency/
+        currency.go
+        currency_test.go
   docs/
     architecture.md
+    merchant.md
+    payer.md
   go.mod
   README.md
 ```
@@ -182,9 +210,12 @@ stateDiagram-v2
 Current documentation:
 
 - `docs/architecture.md`
+- `docs/merchant.md`
+- `docs/payer.md`
 
 Planned documentation:
 
+- `docs/architecture-tradeoffs.md`
 - `docs/payment-lifecycle.md`
 - `docs/idempotency.md`
 - `docs/rate-limiting.md`
