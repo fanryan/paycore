@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+
+	"github.com/fanryan/paycore/internal/shared/httpjson"
 )
 
 type Handler struct {
@@ -43,7 +45,7 @@ func (h *Handler) HandlePayers(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		h.listPayers(w, r)
 	default:
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{
+		httpjson.Write(w, http.StatusMethodNotAllowed, map[string]string{
 			"error_code": "METHOD_NOT_ALLOWED",
 			"message":    "Method not allowed",
 		})
@@ -54,7 +56,7 @@ func (h *Handler) createPayer(w http.ResponseWriter, r *http.Request) {
 	var request CreatePayerRequest
 
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
+		httpjson.Write(w, http.StatusBadRequest, map[string]string{
 			"error_code": "INVALID_JSON",
 			"message":    "Request body must be valid JSON",
 		})
@@ -68,17 +70,17 @@ func (h *Handler) createPayer(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		status, body := payerErrorResponse(err)
-		writeJSON(w, status, body)
+		httpjson.Write(w, status, body)
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, payerResponse(payer))
+	httpjson.Write(w, http.StatusCreated, payerResponse(payer))
 }
 
 func (h *Handler) listPayers(w http.ResponseWriter, r *http.Request) {
 	payers, err := h.service.ListPayers(r.Context())
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{
+		httpjson.Write(w, http.StatusInternalServerError, map[string]string{
 			"error_code": "PAYER_LIST_FAILED",
 			"message":    "Failed to list payers",
 		})
@@ -90,7 +92,7 @@ func (h *Handler) listPayers(w http.ResponseWriter, r *http.Request) {
 		response = append(response, payerResponse(payer))
 	}
 
-	writeJSON(w, http.StatusOK, response)
+	httpjson.Write(w, http.StatusOK, response)
 }
 
 func payerErrorResponse(err error) (int, map[string]string) {
@@ -123,11 +125,4 @@ func payerResponse(payer Payer) PayerResponse {
 		CreatedAt:             payer.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		UpdatedAt:             payer.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
-}
-
-func writeJSON(w http.ResponseWriter, status int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-
-	_ = json.NewEncoder(w).Encode(body)
 }

@@ -1,10 +1,11 @@
 package http
 
 import (
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/fanryan/paycore/internal/shared/httpjson"
 )
 
 type RouterConfig struct {
@@ -55,15 +56,8 @@ func notFoundHandler(w http.ResponseWriter, r *http.Request) {
 	writeError(w, r, http.StatusNotFound, "ROUTE_NOT_FOUND", "Route not found")
 }
 
-func writeJSON(w http.ResponseWriter, status int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-
-	_ = json.NewEncoder(w).Encode(body)
-}
-
 func writeError(w http.ResponseWriter, r *http.Request, status int, errorCode string, message string) {
-	writeJSON(w, status, ErrorResponse{
+	httpjson.Write(w, status, ErrorResponse{
 		ErrorCode: errorCode,
 		Message:   message,
 		RequestID: requestIDFromContext(r.Context()),

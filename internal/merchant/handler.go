@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+
+	"github.com/fanryan/paycore/internal/shared/httpjson"
 )
 
 type Handler struct {
@@ -42,7 +44,7 @@ func (h *Handler) HandleMerchants(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		h.listMerchants(w, r)
 	default:
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{
+		httpjson.Write(w, http.StatusMethodNotAllowed, map[string]string{
 			"error_code": "METHOD_NOT_ALLOWED",
 			"message":    "Method not allowed",
 		})
@@ -53,7 +55,7 @@ func (h *Handler) createMerchant(w http.ResponseWriter, r *http.Request) {
 	var request CreateMerchantRequest
 
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
+		httpjson.Write(w, http.StatusBadRequest, map[string]string{
 			"error_code": "INVALID_JSON",
 			"message":    "Request body must be valid JSON",
 		})
@@ -67,17 +69,17 @@ func (h *Handler) createMerchant(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		status, body := merchantErrorResponse(err)
-		writeJSON(w, status, body)
+		httpjson.Write(w, status, body)
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, merchantResponse(merchant))
+	httpjson.Write(w, http.StatusCreated, merchantResponse(merchant))
 }
 
 func (h *Handler) listMerchants(w http.ResponseWriter, r *http.Request) {
 	merchants, err := h.service.ListMerchants(r.Context())
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{
+		httpjson.Write(w, http.StatusInternalServerError, map[string]string{
 			"error_code": "MERCHANT_LIST_FAILED",
 			"message":    "Failed to list merchants",
 		})
@@ -89,7 +91,7 @@ func (h *Handler) listMerchants(w http.ResponseWriter, r *http.Request) {
 		response = append(response, merchantResponse(merchant))
 	}
 
-	writeJSON(w, http.StatusOK, response)
+	httpjson.Write(w, http.StatusOK, response)
 }
 
 func merchantErrorResponse(err error) (int, map[string]string) {
@@ -121,11 +123,4 @@ func merchantResponse(merchant Merchant) MerchantResponse {
 		CreatedAt:          merchant.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		UpdatedAt:          merchant.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
-}
-
-func writeJSON(w http.ResponseWriter, status int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-
-	_ = json.NewEncoder(w).Encode(body)
 }
