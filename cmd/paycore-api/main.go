@@ -9,8 +9,8 @@ import (
 	"os/signal"
 	"time"
 
-	"github.com/fanryan/paycore/internal/config"
-	"github.com/fanryan/paycore/internal/httpapi"
+	httpapi "github.com/fanryan/paycore/internal/http"
+	"github.com/fanryan/paycore/internal/shared/config"
 )
 
 const (

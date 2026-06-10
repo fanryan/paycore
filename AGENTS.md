@@ -111,6 +111,72 @@ Build in this broad order unless the user asks otherwise:
 - Do not add broad abstractions before there is real duplication or a clear boundary.
 - Keep tests close to the behavior being introduced in the current step.
 
+## Package Layout
+
+Use a feature-first package layout with one central HTTP composition root.
+
+Preferred shape:
+
+```text
+cmd/paycore-api/main.go
+internal/
+  http/
+    router.go
+    middleware.go
+  merchant/
+    entity.go
+    service.go
+    repository.go
+    handler.go
+    adapters/
+      memory/
+        repository.go
+      postgres/
+        repository.go
+  payer/
+    entity.go
+    service.go
+    repository.go
+    handler.go
+    adapters/
+      memory/
+        repository.go
+      postgres/
+        repository.go
+  shared/
+    config/
+    currency/
+    db/
+    logger/
+```
+
+Rules:
+
+- Feature folders own their handler, service, repository interface, entity/domain behavior, and adapters.
+- `internal/http/router.go` wires feature handlers together.
+- `internal/http/middleware.go` owns cross-cutting HTTP middleware.
+- `cmd/paycore-api/main.go` bootstraps configuration, logger, repositories, services, handlers, and router.
+- Do not put feature-specific routers inside feature packages.
+- Do not put business rules in middleware.
+- Do not create placeholder packages such as `postgres`, `db`, or `logger` before there is real code to place there.
+
+Middleware may contain:
+
+- Request logging.
+- Recovery and panic handling.
+- Authentication.
+- Request ID propagation.
+- Rate limiting.
+- CORS.
+- Body size limits.
+
+Feature handlers should own:
+
+- Parsing request JSON.
+- Validating request shape.
+- Calling the feature service.
+- Mapping feature/domain errors to HTTP responses.
+
 ## Testing Practices
 
 - Add or update tests directly when the user asks for tests or when a milestone needs coverage.
