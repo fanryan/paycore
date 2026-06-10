@@ -122,16 +122,24 @@ internal/http.Router
   +--> GET /merchants
   +--> POST /payers
   +--> GET /payers
+  +--> POST /payments/authorize
 ```
 
 Merchant and payer handlers currently use in-memory repositories. Their state is not durable and is reset when the API process restarts.
 
 ## Current Payment Authorization Flow
 
-Payment authorization currently exists as an internal service, not as an HTTP endpoint.
+Payment authorization is currently exposed through `POST /payments/authorize`.
 
 ```text
 Caller
+  |
+  | POST /payments/authorize
+  v
+internal/http.Router
+  |
+  v
+Payment Handler
   |
   v
 Payment Service
@@ -147,4 +155,4 @@ Payment Service
   +--> persist payer, hold, and payment in memory
 ```
 
-Because this is still in-memory, this flow is not transactionally durable. PostgreSQL will later make payer balance mutation, hold creation, payment creation, idempotency, and outbox event creation part of one transaction.
+Because this is still in-memory, this flow is not transactionally durable. It also does not yet enforce `Idempotency-Key` or Redis rate limiting. PostgreSQL will later make payer balance mutation, hold creation, payment creation, idempotency, and outbox event creation part of one transaction.

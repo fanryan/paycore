@@ -15,6 +15,7 @@ type RouterConfig struct {
 	Logger          *slog.Logger
 	MerchantHandler http.Handler
 	PayerHandler    http.Handler
+	PaymentHandler  http.Handler
 }
 
 type ErrorResponse struct {
@@ -41,6 +42,10 @@ func NewRouter(config RouterConfig) http.Handler {
 
 	if config.PayerHandler != nil {
 		mux.Handle("/payers", config.PayerHandler)
+	}
+
+	if config.PaymentHandler != nil {
+		mux.Handle("/payments/authorize", config.PaymentHandler)
 	}
 
 	mux.HandleFunc("/", notFoundHandler)

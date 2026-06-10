@@ -39,6 +39,7 @@ Current development stage:
 - Payer balance reservation, release, and held-capture behavior implemented
 - Payment entity, authorization hold entity, repository interface, and in-memory adapter implemented
 - Local payment authorization service implemented without HTTP exposure yet
+- Payment authorization HTTP endpoint implemented without idempotency enforcement yet
 - Shared currency normalization and validation implemented
 - Shared random id helper implemented
 - HTTP API foundation tests added
@@ -56,11 +57,12 @@ POST /merchants
 GET /merchants
 POST /payers
 GET /payers
+POST /payments/authorize
 ```
 
-Infrastructure such as PostgreSQL, Redis, Kafka, Prometheus, Docker Compose, payment HTTP endpoints, settlement processing, and outbox publishing has not been implemented yet.
+Infrastructure such as PostgreSQL, Redis, Kafka, Prometheus, Docker Compose, settlement processing, and outbox publishing has not been implemented yet.
 
-Payment authorization currently exists as an internal service only. It is not exposed as `POST /payments/authorize` yet.
+Payment authorization is currently local and in-memory. It does not yet enforce `Idempotency-Key`, Redis rate limiting, durable PostgreSQL transactions, or outbox event creation.
 
 ## Run Locally
 
@@ -105,6 +107,10 @@ curl -i -X POST http://localhost:8080/merchants \
 curl -i -X POST http://localhost:8080/payers \
   -H 'Content-Type: application/json' \
   -d '{"id":"payer-1","available_balance_minor":10000,"currency":"usd"}'
+
+curl -i -X POST http://localhost:8080/payments/authorize \
+  -H 'Content-Type: application/json' \
+  -d '{"merchant_id":"merchant-1","payer_id":"payer-1","amount":4000,"currency":"usd"}'
 ```
 
 ## Test

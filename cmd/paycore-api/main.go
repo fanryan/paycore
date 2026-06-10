@@ -14,6 +14,8 @@ import (
 	merchantmemory "github.com/fanryan/paycore/internal/merchant/adapters/memory"
 	"github.com/fanryan/paycore/internal/payer"
 	payermemory "github.com/fanryan/paycore/internal/payer/adapters/memory"
+	"github.com/fanryan/paycore/internal/payment"
+	paymentmemory "github.com/fanryan/paycore/internal/payment/adapters/memory"
 	"github.com/fanryan/paycore/internal/shared/config"
 )
 
@@ -34,6 +36,10 @@ func main() {
 	payerService := payer.NewPayerService(payerRepository)
 	payerHandler := payer.NewHandler(payerService)
 
+	paymentRepository := paymentmemory.NewStore()
+	paymentService := payment.NewService(merchantRepository, payerRepository, paymentRepository)
+	paymentHandler := payment.NewHandler(paymentService)
+
 	server := &http.Server{
 		Addr: cfg.HTTPAddr,
 		Handler: httpapi.NewRouter(httpapi.RouterConfig{
@@ -43,6 +49,7 @@ func main() {
 			Logger:          logger,
 			MerchantHandler: merchantHandler,
 			PayerHandler:    payerHandler,
+			PaymentHandler:  paymentHandler,
 		}),
 		ReadHeaderTimeout: cfg.HTTPReadHeaderTimeout,
 	}

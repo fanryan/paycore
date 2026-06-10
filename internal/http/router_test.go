@@ -13,6 +13,8 @@ import (
 	merchantmemory "github.com/fanryan/paycore/internal/merchant/adapters/memory"
 	"github.com/fanryan/paycore/internal/payer"
 	payermemory "github.com/fanryan/paycore/internal/payer/adapters/memory"
+	"github.com/fanryan/paycore/internal/payment"
+	paymentmemory "github.com/fanryan/paycore/internal/payment/adapters/memory"
 )
 
 func TestHealthEndpoint(t *testing.T) {
@@ -221,6 +223,76 @@ func TestPayerRouteIsWired(t *testing.T) {
 
 	if body.Currency != "USD" {
 		t.Fatalf("expected currency USD, got %q", body.Currency)
+	}
+}
+
+func TestPaymentAuthorizeRouteIsWired(t *testing.T) {
+	merchantRepository := merchantmemory.NewStore()
+	merchantService := merchant.NewMerchantService(merchantRepository)
+	merchantHandler := merchant.NewHandler(merchantService)
+
+	payerRepository := payermemory.NewStore()
+	payerService := payer.NewPayerService(payerRepository)
+	payerHandler := payer.NewHandler(payerService)
+
+	paymentRepository := paymentmemory.NewStore()
+	paymentService := payment.NewService(merchantRepository, payerRepository, paymentRepository)
+	paymentHandler := payment.NewHandler(paymentService)
+
+	router := NewRouter(RouterConfig{
+		ServiceName:     "paycore-api",
+		Version:         "test",
+		StartedAt:       time.Date(2026, 6, 6, 12, 0, 0, 0, time.UTC),
+		Logger:          slog.Default(),
+		MerchantHandler: merchantHandler,
+		PayerHandler:    payerHandler,
+		PaymentHandler:  paymentHandler,
+	})
+
+	createMerchantRequest := httptest.NewRequest(http.MethodPost, "/merchants", bytes.NewBufferString(`{
+		"id": "merchant-1",
+		"name": "Demo Merchant",
+		"settlement_currency": "USD"
+	}`))
+	createMerchantResponse := httptest.NewRecorder()
+	router.ServeHTTP(createMerchantResponse, createMerchantRequest)
+	if createMerchantResponse.Code != http.StatusCreated {
+		t.Fatalf("expected merchant create status %d, got %d", http.StatusCreated, createMerchantResponse.Code)
+	}
+
+	createPayerRequest := httptest.NewRequest(http.MethodPost, "/payers", bytes.NewBufferString(`{
+		"id": "payer-1",
+		"available_balance_minor": 10000,
+		"currency": "USD"
+	}`))
+	createPayerResponse := httptest.NewRecorder()
+	router.ServeHTTP(createPayerResponse, createPayerRequest)
+	if createPayerResponse.Code != http.StatusCreated {
+		t.Fatalf("expected payer create status %d, got %d", http.StatusCreated, createPayerResponse.Code)
+	}
+
+	authorizeRequest := httptest.NewRequest(http.MethodPost, "/payments/authorize", bytes.NewBufferString(`{
+		"merchant_id": "merchant-1",
+		"payer_id": "payer-1",
+		"amount": 4000,
+		"currency": "USD"
+	}`))
+	authorizeResponse := httptest.NewRecorder()
+
+	router.ServeHTTP(authorizeResponse, authorizeRequest)
+
+	if authorizeResponse.Code != http.StatusCreated {
+		t.Fatalf("expected authorize status %d, got %d", http.StatusCreated, authorizeResponse.Code)
+	}
+
+	assertHeaderExists(t, authorizeResponse, "X-Request-ID")
+	assertJSONContentType(t, authorizeResponse)
+
+	var body payment.AuthorizePaymentResponse
+	decodeJSON(t, authorizeResponse, &body)
+
+	if body.Status != "AUTHORIZED" {
+		t.Fatalf("expected status AUTHORIZED, got %q", body.Status)
 	}
 }
 

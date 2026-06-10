@@ -43,14 +43,14 @@ The Go API currently supports the payment foundation:
   - creates an authorized payment
   - reserves payer balance
   - persists payer, hold, and payment through in-memory repositories
+- Payment authorization HTTP handler in `internal/payment/handler.go`.
+- `POST /payments/authorize` route composed through `internal/http/router.go`.
 - Entity, hold, repository, and service tests.
 
 ### Not Implemented Yet
 
 These are planned but not currently implemented:
 
-- Payment HTTP handler.
-- `POST /payments/authorize`.
 - `POST /payments/{payment_id}/capture`.
 - `GET /payments/{payment_id}`.
 - Idempotency-key enforcement.
@@ -66,9 +66,9 @@ These are planned but not currently implemented:
 
 ### Public Endpoints
 
-None currently.
-
-The only public payment-related behavior today is internal service behavior covered by tests.
+```text
+POST /payments/authorize
+```
 
 ### Protected Endpoints
 
@@ -115,7 +115,7 @@ main()
   +--> starts net/http server
 ```
 
-Payment dependencies are not wired into `main.go` yet because payment HTTP endpoints have not been introduced.
+Payment dependencies are wired in `main.go` with the in-memory repository adapter.
 
 ### Payment Package Boundary
 
@@ -128,6 +128,7 @@ internal/payment
   +--> hold.go
   +--> repository.go
   +--> service.go
+  +--> handler.go
   |
   +--> adapters/memory/repository.go
 ```
@@ -138,7 +139,18 @@ The feature package owns payment lifecycle rules. The HTTP package will only com
 
 ### Current Service Input
 
-There is no HTTP request contract yet. The current service input is:
+Current HTTP request:
+
+```json
+{
+  "merchant_id": "merchant-1",
+  "payer_id": "payer-1",
+  "amount": 4000,
+  "currency": "USD"
+}
+```
+
+Current service input:
 
 ```go
 payment.AuthorizePaymentInput{
@@ -151,28 +163,37 @@ payment.AuthorizePaymentInput{
 
 ### Step-by-Step
 
-1. Caller invokes `Service.AuthorizePayment(...)`.
-2. Service loads the merchant through `merchant.MerchantRepository`.
-3. Service checks `Merchant.CanCreatePayments()`.
-4. Service loads the payer through `payer.PayerRepository`.
-5. Service checks payer currency against the requested payment currency.
-6. Service checks payer available balance through `Payer.CanAuthorize(...)`.
-7. Service generates a local payment id with prefix `pay`.
-8. Service generates a local hold id with prefix `hold`.
-9. Service creates a `HELD` authorization hold.
-10. Service creates an `AUTHORIZED` payment with a 15-minute expiry.
-11. Service reserves payer funds by moving amount from available balance to held balance.
-12. Service persists the updated payer.
-13. Service persists the hold.
-14. Service persists the payment.
-15. Service returns the payment, hold, and updated payer.
+1. Client sends `POST /payments/authorize`.
+2. Router sends the request to `payment.Handler`.
+3. Handler decodes JSON into `AuthorizePaymentRequest`.
+4. Handler calls `Service.AuthorizePayment(...)`.
+5. Service loads the merchant through `merchant.MerchantRepository`.
+6. Service checks `Merchant.CanCreatePayments()`.
+7. Service loads the payer through `payer.PayerRepository`.
+8. Service checks payer currency against the requested payment currency.
+9. Service checks payer available balance through `Payer.CanAuthorize(...)`.
+10. Service generates a local payment id with prefix `pay`.
+11. Service generates a local hold id with prefix `hold`.
+12. Service creates a `HELD` authorization hold.
+13. Service creates an `AUTHORIZED` payment with a 15-minute expiry.
+14. Service reserves payer funds by moving amount from available balance to held balance.
+15. Service persists the updated payer.
+16. Service persists the hold.
+17. Service persists the payment.
+18. Handler returns the authorization response as JSON.
 
 ### Diagram
 
 ```text
-Caller
+Client
   |
-  | AuthorizePaymentInput
+  | POST /payments/authorize
+  v
+internal/http router
+  |
+  v
+payment.Handler
+  |
   v
 Payment Service
   |
@@ -208,7 +229,7 @@ payment.ErrPayerCurrencyMismatch
 payment.ErrInsufficientAvailableBalance
 ```
 
-HTTP error mapping has not been implemented yet. Planned mapping:
+Current HTTP error mapping:
 
 ```text
 missing merchant              -> HTTP 404
@@ -216,8 +237,8 @@ missing payer                 -> HTTP 404
 inactive merchant             -> HTTP 422 or 409
 currency mismatch             -> HTTP 422
 insufficient available balance -> HTTP 422
-idempotency conflict          -> HTTP 409
-rate limit exceeded           -> HTTP 429
+idempotency conflict          -> planned HTTP 409
+rate limit exceeded           -> planned HTTP 429
 ```
 
 ## 4. Payment State Machine
@@ -307,6 +328,9 @@ Current tests cover:
 - duplicate payment and hold errors
 - context cancellation behavior
 - successful authorization service flow
+- payment authorization handler success path
+- payment authorization handler error mapping
+- router-level `/payments/authorize` wiring
 - inactive merchant rejection
 - missing merchant rejection
 - missing payer rejection
@@ -337,13 +361,13 @@ Defines the payment repository interface and payment/hold repository errors.
 
 Defines payment authorization orchestration across merchant, payer, payment, and hold state.
 
+`internal/payment/handler.go`
+
+Owns payment authorization HTTP request parsing, response mapping, and HTTP error mapping.
+
 `internal/payment/adapters/memory/repository.go`
 
 Provides the current non-durable in-memory payment repository implementation.
-
-`internal/payment/handler.go`
-
-Planned. Will own payment HTTP request parsing, response mapping, and HTTP error mapping.
 
 `internal/payment/adapters/postgres/repository.go`
 
@@ -355,8 +379,8 @@ Planned. Will own durable PostgreSQL payment and hold persistence.
 - [x] Add authorization hold entity.
 - [x] Add in-memory payment repository.
 - [x] Add internal authorization service.
-- [ ] Add payment HTTP handler.
-- [ ] Register `POST /payments/authorize`.
+- [x] Add payment HTTP handler.
+- [x] Register `POST /payments/authorize`.
 - [ ] Add idempotency-key enforcement.
 - [ ] Add Redis-backed rate limiting.
 - [ ] Add PostgreSQL payment and hold migrations.
