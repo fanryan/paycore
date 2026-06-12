@@ -12,6 +12,7 @@ The Go API currently supports the payment foundation:
 - Authorization hold entity in `internal/payment/hold.go`.
 - Payment repository interface in `internal/payment/repository.go`.
 - Payment authorization service in `internal/payment/service.go`.
+- Payment capture service in `internal/payment/service.go`.
 - In-memory payment repository adapter in `internal/payment/adapters/memory/repository.go`.
 - Payment statuses:
   - `PENDING`
@@ -43,15 +44,26 @@ The Go API currently supports the payment foundation:
   - creates an authorized payment
   - reserves payer balance
   - persists payer, hold, and payment through in-memory repositories
+- Internal capture service that:
+  - loads payment
+  - loads payment hold
+  - loads payer
+  - validates the payment is still authorized
+  - rejects expired authorizations
+  - captures the payment
+  - captures the hold
+  - deducts payer held balance
+  - persists payer, hold, and payment through in-memory repositories
 - Payment authorization HTTP handler in `internal/payment/handler.go`.
+- Payment capture HTTP handler in `internal/payment/handler.go`.
 - `POST /payments/authorize` route composed through `internal/http/router.go`.
-- Entity, hold, repository, and service tests.
+- `POST /payments/{payment_id}/capture` route composed through `internal/http/router.go`.
+- Entity, hold, repository, service, handler, and router tests.
 
 ### Not Implemented Yet
 
 These are planned but not currently implemented:
 
-- `POST /payments/{payment_id}/capture`.
 - `GET /payments/{payment_id}`.
 - Idempotency-key enforcement.
 - Redis-backed rate limiting.
@@ -68,6 +80,7 @@ These are planned but not currently implemented:
 
 ```text
 POST /payments/authorize
+POST /payments/{payment_id}/capture
 ```
 
 ### Protected Endpoints
@@ -111,7 +124,8 @@ main()
   +--> creates merchant memory repository
   +--> creates payer memory repository
   +--> creates merchant and payer handlers
-  +--> creates internal/http router
+  +--> creates payment repository, service, and handler
+  +--> creates internal/http chi router
   +--> starts net/http server
 ```
 
@@ -133,7 +147,7 @@ internal/payment
   +--> adapters/memory/repository.go
 ```
 
-The feature package owns payment lifecycle rules. The HTTP package will only compose the payment handler once it exists.
+The feature package owns payment lifecycle rules. The HTTP package composes payment routes through the central chi router.
 
 ## 3. Authorization Service Flow
 
@@ -269,9 +283,101 @@ HELD -> CAPTURED
 HELD -> RELEASED
 ```
 
-Holds are created during authorization. Capture and release are entity-level transitions only right now. The payment capture service has not been implemented yet.
+Holds are created during authorization. Capture moves the hold from `HELD` to `CAPTURED` and deducts the captured amount from the payer held balance. Release exists at the entity and payer balance level for future authorization expiry or void flows.
 
-## 6. Persistence
+## 6. Capture Service Flow
+
+### Current Service Input
+
+Current HTTP request:
+
+```http
+POST /payments/pay_123/capture
+```
+
+Current service input:
+
+```go
+payment.CapturePaymentInput{
+    PaymentID: "pay_123",
+}
+```
+
+### Step-by-Step
+
+1. Client sends `POST /payments/{payment_id}/capture`.
+2. Router sends the request to `payment.Handler`.
+3. Handler reads `payment_id` from the chi route parameter.
+4. Handler calls `Service.CapturePayment(...)`.
+5. Service loads the payment.
+6. Service loads the hold by payment id.
+7. Service loads the payer referenced by the payment.
+8. Service rejects payments that are not `AUTHORIZED`.
+9. Service rejects authorizations past their expiry time.
+10. Service transitions the payment to `CAPTURED`.
+11. Service transitions the hold to `CAPTURED`.
+12. Service deducts the payment amount from payer held balance.
+13. Service persists the updated payer.
+14. Service persists the captured hold.
+15. Service persists the captured payment.
+16. Handler returns the capture response as JSON.
+
+### Diagram
+
+```text
+Client
+  |
+  | POST /payments/{payment_id}/capture
+  v
+internal/http chi router
+  |
+  v
+payment.Handler
+  |
+  v
+Payment Service
+  |
+  +--> PaymentRepository.GetPayment
+  +--> PaymentRepository.GetHoldByPaymentID
+  +--> PayerRepository.GetPayer
+  |
+  +--> Payment.Capture
+  +--> Hold.Capture
+  +--> Payer.CaptureHeld
+  |
+  +--> PayerRepository.UpdatePayer
+  +--> PaymentRepository.UpdateHold
+  +--> PaymentRepository.UpdatePayment
+  |
+  v
+CapturePaymentResult
+```
+
+### Failure Path
+
+Current capture failures include:
+
+```text
+payment.ErrPaymentNotFound
+payment.ErrHoldNotFound
+payer.ErrPayerNotFound
+payment.ErrPaymentNotCapturable
+payment.ErrAuthorizationExpired
+```
+
+Current HTTP error mapping:
+
+```text
+missing payment         -> HTTP 404
+missing hold            -> HTTP 404
+missing payer           -> HTTP 404
+not capturable          -> HTTP 409
+authorization expired   -> HTTP 422
+idempotency conflict    -> planned HTTP 409
+rate limit exceeded     -> planned HTTP 429
+```
+
+## 7. Persistence
 
 ### Current In-Memory Adapter
 
@@ -289,11 +395,11 @@ This adapter is useful for local service development before PostgreSQL exists. I
 
 ### Current Consistency Limitation
 
-The authorization service writes payer, hold, and payment records through separate in-memory calls.
+The authorization and capture services write payer, hold, and payment records through separate in-memory calls.
 
 That means this local implementation does not provide transactionality. If a later write fails after an earlier write succeeds, partial state is possible.
 
-This is acceptable for the current foundation only. PostgreSQL authorization must later run payer balance mutation, hold creation, payment creation, idempotency persistence, and outbox event creation in one transaction.
+This is acceptable for the current foundation only. PostgreSQL authorization and capture must later run payer balance mutation, hold mutation, payment mutation, idempotency persistence, and outbox event creation in one transaction.
 
 ### Planned PostgreSQL Adapter
 
@@ -312,7 +418,7 @@ Planned durable records:
 - idempotency records
 - outbox events
 
-## 7. Tests
+## 8. Tests
 
 Current tests cover:
 
@@ -328,14 +434,22 @@ Current tests cover:
 - duplicate payment and hold errors
 - context cancellation behavior
 - successful authorization service flow
+- successful capture service flow
 - payment authorization handler success path
 - payment authorization handler error mapping
+- payment capture handler success path
+- payment capture handler error mapping
 - router-level `/payments/authorize` wiring
+- router-level `/payments/{payment_id}/capture` wiring
 - inactive merchant rejection
 - missing merchant rejection
 - missing payer rejection
 - payer currency mismatch rejection
 - insufficient available balance rejection
+- missing payment on capture rejection
+- missing hold on capture rejection
+- non-capturable payment rejection
+- expired authorization rejection
 
 Run:
 
@@ -343,7 +457,7 @@ Run:
 go test ./...
 ```
 
-## 8. File Guide
+## 9. File Guide
 
 `internal/payment/entity.go`
 
@@ -360,10 +474,11 @@ Defines the payment repository interface and payment/hold repository errors.
 `internal/payment/service.go`
 
 Defines payment authorization orchestration across merchant, payer, payment, and hold state.
+It also defines payment capture orchestration across payment, hold, and payer balance state.
 
 `internal/payment/handler.go`
 
-Owns payment authorization HTTP request parsing, response mapping, and HTTP error mapping.
+Owns payment authorization and capture HTTP request parsing, response mapping, and HTTP error mapping.
 
 `internal/payment/adapters/memory/repository.go`
 
@@ -381,6 +496,8 @@ Planned. Will own durable PostgreSQL payment and hold persistence.
 - [x] Add internal authorization service.
 - [x] Add payment HTTP handler.
 - [x] Register `POST /payments/authorize`.
+- [x] Add payment capture service.
+- [x] Register `POST /payments/{payment_id}/capture`.
 - [ ] Add idempotency-key enforcement.
 - [ ] Add Redis-backed rate limiting.
 - [ ] Add PostgreSQL payment and hold migrations.

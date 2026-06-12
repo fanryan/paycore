@@ -24,6 +24,7 @@ The current repository contains the first API foundation:
 - Readiness endpoint: `GET /readyz`.
 - Version endpoint: `GET /version`.
 - Central HTTP composition package at `internal/http`.
+- Chi-based central router for method routes and path parameters.
 - Request ID middleware using `X-Request-ID`.
 - Structured JSON request logging.
 - Structured JSON error response shape.
@@ -34,7 +35,8 @@ The current repository contains the first API foundation:
 - Merchant and payer HTTP handlers.
 - Merchant and payer routes composed through `internal/http`.
 - Payer balance mutation methods for reserve, release, and held capture.
-- Payment entity, authorization hold entity, repository interface, in-memory adapter, and authorization service.
+- Payment entity, authorization hold entity, repository interface, in-memory adapter, authorization service, and capture service.
+- Payment authorization and capture HTTP handlers.
 - Shared HTTP JSON response helper.
 - Shared random id helper.
 - Unit tests for HTTP routing, configuration loading, currency helpers, merchant behavior, and payer behavior.
@@ -74,7 +76,7 @@ cmd/paycore-api
   -> bootstraps config, logger, HTTP server, and dependencies
 
 internal/http
-  -> router, middleware, system endpoints, shared HTTP response helpers
+  -> chi router, middleware, system endpoints, shared HTTP response helpers
 
 internal/merchant
   -> merchant entity, service, repository interface, memory adapter
@@ -83,7 +85,7 @@ internal/payer
   -> payer entity, service, repository interface, memory adapter
 
 internal/payment
-  -> payment entity, hold entity, authorization service, repository interface, memory adapter
+  -> payment entity, hold entity, authorization and capture services, repository interface, memory adapter
 
 internal/shared/config
   -> environment-backed application configuration
@@ -123,6 +125,7 @@ internal/http.Router
   +--> POST /payers
   +--> GET /payers
   +--> POST /payments/authorize
+  +--> POST /payments/{payment_id}/capture
 ```
 
 Merchant and payer handlers currently use in-memory repositories. Their state is not durable and is reset when the API process restarts.
@@ -155,4 +158,32 @@ Payment Service
   +--> persist payer, hold, and payment in memory
 ```
 
-Because this is still in-memory, this flow is not transactionally durable. It also does not yet enforce `Idempotency-Key` or Redis rate limiting. PostgreSQL will later make payer balance mutation, hold creation, payment creation, idempotency, and outbox event creation part of one transaction.
+## Current Payment Capture Flow
+
+Payment capture is currently exposed through `POST /payments/{payment_id}/capture`.
+
+```text
+Caller
+  |
+  | POST /payments/{payment_id}/capture
+  v
+internal/http chi router
+  |
+  v
+Payment Handler
+  |
+  v
+Payment Service
+  |
+  +--> load payment
+  +--> load hold by payment id
+  +--> load payer
+  +--> verify payment is AUTHORIZED
+  +--> verify authorization has not expired
+  +--> mark payment CAPTURED
+  +--> mark hold CAPTURED
+  +--> deduct payer held balance
+  +--> persist payer, hold, and payment in memory
+```
+
+Because these flows are still in-memory, they are not transactionally durable. They also do not yet enforce `Idempotency-Key` or Redis rate limiting. PostgreSQL will later make payer balance mutation, hold mutation, payment mutation, idempotency, and outbox event creation part of one transaction.

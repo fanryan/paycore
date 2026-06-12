@@ -98,6 +98,8 @@ Build in this broad order unless the user asks otherwise:
 ## Coding Practices
 
 - Prefer standard library Go until a dependency clearly pays for itself.
+- Use chi in `internal/http/router.go` for HTTP route composition and path parameters.
+- Avoid manual URL path parsing inside feature handlers when chi route parameters can express the route.
 - Keep HTTP handlers thin; place business rules in domain/service packages.
 - Keep persistence behind repository interfaces once PostgreSQL is introduced.
 - Keep request/response DTOs separate from durable database models when the concepts start to diverge.
@@ -153,7 +155,7 @@ internal/
 Rules:
 
 - Feature folders own their handler, service, repository interface, entity/domain behavior, and adapters.
-- `internal/http/router.go` wires feature handlers together.
+- `internal/http/router.go` wires feature handlers together and owns route patterns such as `/payments/{payment_id}/capture`.
 - `internal/http/middleware.go` owns cross-cutting HTTP middleware.
 - `cmd/paycore-api/main.go` bootstraps configuration, logger, repositories, services, handlers, and router.
 - Do not put feature-specific routers inside feature packages.

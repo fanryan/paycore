@@ -38,14 +38,16 @@ Current development stage:
 - Payer HTTP create and list endpoints implemented
 - Payer balance reservation, release, and held-capture behavior implemented
 - Payment entity, authorization hold entity, repository interface, and in-memory adapter implemented
-- Local payment authorization service implemented without HTTP exposure yet
 - Payment authorization HTTP endpoint implemented without idempotency enforcement yet
+- Payment capture service and HTTP endpoint implemented without idempotency enforcement yet
 - Shared currency normalization and validation implemented
 - Shared random id helper implemented
+- Central HTTP router migrated to chi for path parameters and feature route composition
 - HTTP API foundation tests added
 - Configuration tests added
 - Merchant and payer unit tests added
 - Merchant and payer handler tests added
+- Payment service, handler, repository, entity, hold, and router tests added
 
 Implemented endpoints:
 
@@ -58,6 +60,7 @@ GET /merchants
 POST /payers
 GET /payers
 POST /payments/authorize
+POST /payments/{payment_id}/capture
 ```
 
 Infrastructure such as PostgreSQL, Redis, Kafka, Prometheus, Docker Compose, settlement processing, and outbox publishing has not been implemented yet.
@@ -113,6 +116,12 @@ curl -i -X POST http://localhost:8080/payments/authorize \
   -d '{"merchant_id":"merchant-1","payer_id":"payer-1","amount":4000,"currency":"usd"}'
 ```
 
+Capture an authorized payment:
+
+```bash
+curl -i -X POST http://localhost:8080/payments/<payment_id>/capture
+```
+
 ## Test
 
 Run all tests:
@@ -152,12 +161,18 @@ paycore/
           repository.go
     payment/
       entity.go
+      entity_test.go
+      handler.go
+      handler_test.go
       hold.go
+      hold_test.go
       repository.go
       service.go
+      service_test.go
       adapters/
         memory/
           repository.go
+          repository_test.go
     shared/
       config/
         config.go
