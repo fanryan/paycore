@@ -337,6 +337,98 @@ func TestHandlerWithIdempotencyRejectsKeyConflict(t *testing.T) {
 	}
 }
 
+func TestHandlerWithIdempotencyRejectsMissingKeyOnCapture(t *testing.T) {
+	fixture := newIdempotentHandlerFixture(t)
+	authorization := authorizeWithIdempotency(t, fixture, "authorize-key-1")
+
+	request := httptest.NewRequest(http.MethodPost, "/payments/"+authorization.PaymentID+"/capture", nil)
+	response := httptest.NewRecorder()
+
+	fixture.router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, response.Code)
+	}
+
+	var body map[string]string
+	decodeJSON(t, response, &body)
+
+	if body["error_code"] != "IDEMPOTENCY_KEY_REQUIRED" {
+		t.Fatalf("expected IDEMPOTENCY_KEY_REQUIRED, got %q", body["error_code"])
+	}
+}
+
+func TestHandlerWithIdempotencyReplaysCompletedCapture(t *testing.T) {
+	fixture := newIdempotentHandlerFixture(t)
+	authorization := authorizeWithIdempotency(t, fixture, "authorize-key-1")
+
+	firstRequest := httptest.NewRequest(http.MethodPost, "/payments/"+authorization.PaymentID+"/capture", nil)
+	firstRequest.Header.Set("Idempotency-Key", "capture-key-1")
+	firstResponse := httptest.NewRecorder()
+
+	fixture.router.ServeHTTP(firstResponse, firstRequest)
+
+	if firstResponse.Code != http.StatusOK {
+		t.Fatalf("expected first capture status %d, got %d", http.StatusOK, firstResponse.Code)
+	}
+
+	var firstBody payment.CapturePaymentResponse
+	decodeJSON(t, firstResponse, &firstBody)
+
+	secondRequest := httptest.NewRequest(http.MethodPost, "/payments/"+authorization.PaymentID+"/capture", nil)
+	secondRequest.Header.Set("Idempotency-Key", "capture-key-1")
+	secondResponse := httptest.NewRecorder()
+
+	fixture.router.ServeHTTP(secondResponse, secondRequest)
+
+	if secondResponse.Code != http.StatusOK {
+		t.Fatalf("expected replay status %d, got %d", http.StatusOK, secondResponse.Code)
+	}
+
+	var secondBody payment.CapturePaymentResponse
+	decodeJSON(t, secondResponse, &secondBody)
+
+	if secondBody.PaymentID != firstBody.PaymentID {
+		t.Fatalf("expected replay payment id %q, got %q", firstBody.PaymentID, secondBody.PaymentID)
+	}
+
+	if secondBody.CapturedAt != firstBody.CapturedAt {
+		t.Fatalf("expected replay captured_at %q, got %q", firstBody.CapturedAt, secondBody.CapturedAt)
+	}
+}
+
+func TestHandlerWithIdempotencyRejectsCaptureKeyConflictAcrossPayments(t *testing.T) {
+	fixture := newIdempotentHandlerFixture(t)
+	firstAuthorization := authorizeWithIdempotency(t, fixture, "authorize-key-1")
+	secondAuthorization := authorizeWithIdempotency(t, fixture, "authorize-key-2")
+
+	firstRequest := httptest.NewRequest(http.MethodPost, "/payments/"+firstAuthorization.PaymentID+"/capture", nil)
+	firstRequest.Header.Set("Idempotency-Key", "capture-key-1")
+	firstResponse := httptest.NewRecorder()
+
+	fixture.router.ServeHTTP(firstResponse, firstRequest)
+	if firstResponse.Code != http.StatusOK {
+		t.Fatalf("expected first capture status %d, got %d", http.StatusOK, firstResponse.Code)
+	}
+
+	secondRequest := httptest.NewRequest(http.MethodPost, "/payments/"+secondAuthorization.PaymentID+"/capture", nil)
+	secondRequest.Header.Set("Idempotency-Key", "capture-key-1")
+	secondResponse := httptest.NewRecorder()
+
+	fixture.router.ServeHTTP(secondResponse, secondRequest)
+
+	if secondResponse.Code != http.StatusConflict {
+		t.Fatalf("expected conflict status %d, got %d", http.StatusConflict, secondResponse.Code)
+	}
+
+	var body map[string]string
+	decodeJSON(t, secondResponse, &body)
+
+	if body["error_code"] != "IDEMPOTENCY_KEY_CONFLICT" {
+		t.Fatalf("expected IDEMPOTENCY_KEY_CONFLICT, got %q", body["error_code"])
+	}
+}
+
 type handlerFixture struct {
 	handler *payment.Handler
 	router  http.Handler
@@ -414,6 +506,29 @@ func newIdempotentHandlerFixture(t *testing.T) handlerFixture {
 		handler: handler,
 		router:  router,
 	}
+}
+
+func authorizeWithIdempotency(t *testing.T, fixture handlerFixture, key string) payment.AuthorizePaymentResponse {
+	t.Helper()
+
+	request := httptest.NewRequest(http.MethodPost, "/payments/authorize", bytes.NewBufferString(`{
+		"merchant_id": "merchant-1",
+		"payer_id": "payer-1",
+		"amount": 4000,
+		"currency": "usd"
+	}`))
+	request.Header.Set("Idempotency-Key", key)
+	response := httptest.NewRecorder()
+
+	fixture.handler.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("expected authorize status %d, got %d", http.StatusCreated, response.Code)
+	}
+
+	var body payment.AuthorizePaymentResponse
+	decodeJSON(t, response, &body)
+
+	return body
 }
 
 func decodeJSON(t *testing.T, response *httptest.ResponseRecorder, target any) {

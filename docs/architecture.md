@@ -38,7 +38,7 @@ The current repository contains the first API foundation:
 - Payment entity, authorization hold entity, repository interface, in-memory adapter, authorization service, and capture service.
 - Payment authorization and capture HTTP handlers.
 - In-memory idempotency record, repository interface, adapter, and service.
-- Local `Idempotency-Key` enforcement for payment authorization.
+- Local `Idempotency-Key` enforcement for payment authorization and capture.
 - Shared HTTP JSON response helper.
 - Shared random id helper.
 - Unit tests for HTTP routing, configuration loading, currency helpers, merchant behavior, and payer behavior.
@@ -172,16 +172,21 @@ Payment Service
 ## Current Payment Capture Flow
 
 Payment capture is currently exposed through `POST /payments/{payment_id}/capture`.
+It requires `Idempotency-Key` and stores local in-memory idempotency records.
 
 ```text
 Caller
   |
   | POST /payments/{payment_id}/capture
+  | Idempotency-Key: <key>
   v
 internal/http chi router
   |
   v
 Payment Handler
+  |
+  +--> hash method, path, and body
+  +--> create or replay idempotency record
   |
   v
 Payment Service
@@ -195,6 +200,7 @@ Payment Service
   +--> mark hold CAPTURED
   +--> deduct payer held balance
   +--> persist payer, hold, and payment in memory
+  +--> complete idempotency record with response
 ```
 
-Because these flows are still in-memory, they are not transactionally durable. Authorization now enforces `Idempotency-Key` locally, but the idempotency record is also in-memory and is lost on restart. Capture does not yet enforce idempotency. PostgreSQL will later make payer balance mutation, hold mutation, payment mutation, idempotency, and outbox event creation part of one transaction.
+Because these flows are still in-memory, they are not transactionally durable. Authorization and capture now enforce `Idempotency-Key` locally, but the idempotency record is also in-memory and is lost on restart. PostgreSQL will later make payer balance mutation, hold mutation, payment mutation, idempotency, and outbox event creation part of one transaction.

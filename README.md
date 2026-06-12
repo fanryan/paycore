@@ -40,7 +40,7 @@ Current development stage:
 - Payment entity, authorization hold entity, repository interface, and in-memory adapter implemented
 - In-memory idempotency record, service, repository interface, and memory adapter implemented
 - Payment authorization HTTP endpoint implemented with local in-memory `Idempotency-Key` enforcement
-- Payment capture service and HTTP endpoint implemented without idempotency enforcement yet
+- Payment capture service and HTTP endpoint implemented with local in-memory `Idempotency-Key` enforcement
 - Shared currency normalization and validation implemented
 - Shared random id helper implemented
 - Central HTTP router migrated to chi for path parameters and feature route composition
@@ -66,7 +66,7 @@ POST /payments/{payment_id}/capture
 
 Infrastructure such as PostgreSQL, Redis, Kafka, Prometheus, Docker Compose, settlement processing, and outbox publishing has not been implemented yet.
 
-Payment authorization is currently local and in-memory. It enforces `Idempotency-Key` through an in-memory repository, but does not yet use durable PostgreSQL idempotency records, Redis response caching, Redis rate limiting, durable PostgreSQL payment transactions, or outbox event creation.
+Payment authorization and capture are currently local and in-memory. They enforce `Idempotency-Key` through an in-memory repository, but do not yet use durable PostgreSQL idempotency records, Redis response caching, Redis rate limiting, durable PostgreSQL payment transactions, or outbox event creation.
 
 ## Run Locally
 
@@ -121,7 +121,8 @@ curl -i -X POST http://localhost:8080/payments/authorize \
 Capture an authorized payment:
 
 ```bash
-curl -i -X POST http://localhost:8080/payments/<payment_id>/capture
+curl -i -X POST http://localhost:8080/payments/<payment_id>/capture \
+  -H 'Idempotency-Key: demo-capture-key-1'
 ```
 
 ## Test

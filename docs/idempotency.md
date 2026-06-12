@@ -12,7 +12,7 @@ The Go API currently supports a local idempotency foundation:
 - Idempotency repository interface in `internal/idempotency/repository.go`.
 - Idempotency service in `internal/idempotency/service.go`.
 - In-memory idempotency repository adapter in `internal/idempotency/adapters/memory/repository.go`.
-- Request body hashing with SHA-256.
+- Request hashing with SHA-256 over HTTP method, URL path, and request body.
 - Idempotency statuses:
   - `IN_PROGRESS`
   - `COMPLETED`
@@ -24,6 +24,7 @@ The Go API currently supports a local idempotency foundation:
 - Expired key rejection.
 - In-progress duplicate request rejection.
 - Payment authorization integration for `POST /payments/authorize`.
+- Payment capture integration for `POST /payments/{payment_id}/capture`.
 - Handler-level response recording for successful replay.
 - Unit tests for record behavior, memory repository behavior, service behavior, payment handler behavior, and router behavior.
 
@@ -31,7 +32,6 @@ The Go API currently supports a local idempotency foundation:
 
 These are planned but not currently implemented:
 
-- Idempotency enforcement for `POST /payments/{payment_id}/capture`.
 - PostgreSQL durable idempotency records.
 - Redis idempotency response cache.
 - Request hash canonicalization beyond raw request body hashing.
@@ -46,6 +46,7 @@ Idempotency is currently enforced on:
 
 ```text
 POST /payments/authorize
+POST /payments/{payment_id}/capture
 ```
 
 ### Required Header
@@ -118,7 +119,7 @@ Idempotency-Key: demo-key-1
 1. Client sends `POST /payments/authorize`.
 2. Payment handler reads the request body.
 3. Payment handler requires `Idempotency-Key`.
-4. Payment handler hashes the raw request body with SHA-256.
+4. Payment handler hashes the HTTP method, URL path, and request body with SHA-256.
 5. Idempotency service creates an `IN_PROGRESS` record when the key is new.
 6. Payment handler continues to authorize the payment.
 7. Payment handler records the final HTTP status and response body.
@@ -136,7 +137,7 @@ Client
   v
 payment.Handler
   |
-  +--> HashRequestBody
+  +--> HashRequest
   |
   +--> IdempotencyService.StartRequest
   |       |
@@ -154,7 +155,57 @@ payment.Handler
 HTTP response
 ```
 
-## 4. Failure Path
+## 4. Capture Idempotency Flow
+
+### Current Request
+
+```http
+POST /payments/pay_123/capture
+Idempotency-Key: capture-key-1
+```
+
+### Step-by-Step
+
+1. Client sends `POST /payments/{payment_id}/capture`.
+2. Payment handler reads the payment id from the chi route parameter.
+3. Payment handler requires `Idempotency-Key`.
+4. Payment handler hashes the HTTP method, URL path, and empty request body.
+5. Idempotency service creates an `IN_PROGRESS` record when the key is new.
+6. Payment handler continues to capture the payment.
+7. Payment handler records the final HTTP status and response body.
+8. Idempotency service marks the record `COMPLETED`.
+9. A later request with the same key and same payment path returns the stored response.
+10. A later request with the same key and a different payment path returns `409`.
+
+### Diagram
+
+```text
+Client
+  |
+  | POST /payments/{payment_id}/capture
+  | Idempotency-Key: capture-key-1
+  v
+payment.Handler
+  |
+  +--> HashRequest(method, path, body)
+  |
+  +--> IdempotencyService.StartRequest
+  |       |
+  |       +--> CreateRecord
+  |       +--> or replay completed response
+  |       +--> or reject key conflict
+  |
+  +--> Payment Service
+  |
+  +--> responseRecorder
+  |
+  +--> IdempotencyService.CompleteRequest
+  |
+  v
+HTTP response
+```
+
+## 5. Failure Path
 
 Current idempotency failures include:
 
@@ -171,13 +222,13 @@ Current HTTP error mapping:
 
 ```text
 missing Idempotency-Key       -> HTTP 400
-same key, different body      -> HTTP 409
+same key, different request   -> HTTP 409
 expired idempotency key       -> HTTP 409
 same key still in progress    -> HTTP 409
 invalid idempotency input     -> HTTP 400
 ```
 
-## 5. Persistence
+## 6. Persistence
 
 ### Current In-Memory Adapter
 
@@ -214,7 +265,7 @@ Redis response caching is planned but not implemented.
 
 Redis may replay completed responses faster, but PostgreSQL remains authoritative. If Redis is unavailable for idempotency response caching, PayCore should fall back to PostgreSQL records.
 
-## 6. Tests
+## 7. Tests
 
 Current tests cover:
 
@@ -223,6 +274,7 @@ Current tests cover:
 - record completion
 - response body cloning
 - request body hashing
+- method and path request hashing
 - expiry checks
 - memory repository create/get/update behavior
 - duplicate key rejection
@@ -236,6 +288,9 @@ Current tests cover:
 - payment authorization missing-key rejection
 - payment authorization replay
 - payment authorization key conflict rejection
+- payment capture missing-key rejection
+- payment capture replay
+- payment capture key conflict rejection across different payment paths
 
 Run:
 
@@ -243,11 +298,11 @@ Run:
 go test ./...
 ```
 
-## 7. File Guide
+## 8. File Guide
 
 `internal/idempotency/record.go`
 
-Defines `Record`, statuses, record construction, completion, expiry checks, and request body hashing.
+Defines `Record`, statuses, record construction, completion, expiry checks, and request hashing.
 
 `internal/idempotency/repository.go`
 
@@ -263,7 +318,7 @@ Provides the current non-durable in-memory idempotency repository implementation
 
 `internal/payment/response_recorder.go`
 
-Captures response status and body for payment authorization replay.
+Captures response status and body for payment authorization and capture replay.
 
 ## Checklist
 
@@ -274,7 +329,7 @@ Captures response status and body for payment authorization replay.
 - [x] Enforce `Idempotency-Key` on payment authorization.
 - [x] Replay same key and same request hash.
 - [x] Reject same key and different request hash.
-- [ ] Enforce `Idempotency-Key` on payment capture.
+- [x] Enforce `Idempotency-Key` on payment capture.
 - [ ] Add PostgreSQL durable idempotency records.
 - [ ] Add Redis idempotency response cache.
 - [ ] Add idempotency metrics.

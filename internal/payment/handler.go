@@ -147,6 +147,27 @@ func (h *Handler) HandleCapture(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	recorder := newResponseRecorder(w)
+	w = recorder
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		httpjson.Write(w, http.StatusBadRequest, map[string]string{
+			"error_code": "INVALID_REQUEST_BODY",
+			"message":    "Request body could not be read",
+		})
+		return
+	}
+
+	if h.idempotency != nil {
+		result, handled := h.handleIdempotencyStart(w, r, body)
+		if handled {
+			return
+		}
+
+		defer h.completeIdempotency(r, result.Record.Key, w)
+	}
+
 	result, err := h.service.CapturePayment(r.Context(), CapturePaymentInput{
 		PaymentID: paymentID,
 	})
@@ -171,7 +192,7 @@ func (h *Handler) handleIdempotencyStart(w http.ResponseWriter, r *http.Request,
 
 	result, err := h.idempotency.StartRequest(r.Context(), idempotency.StartRequestInput{
 		Key:         key,
-		RequestHash: idempotency.HashRequestBody(body),
+		RequestHash: idempotency.HashRequest(r.Method, r.URL.Path, body),
 	})
 	if err != nil {
 		status, response := idempotencyErrorResponse(err)

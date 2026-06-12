@@ -36,6 +36,7 @@ The Go API currently supports the payment foundation:
 - Local random id generation through `internal/shared/id`.
 - In-memory repository support for payments and holds.
 - In-memory `Idempotency-Key` enforcement for `POST /payments/authorize`.
+- In-memory `Idempotency-Key` enforcement for `POST /payments/{payment_id}/capture`.
 - Internal authorization service that:
   - loads merchant
   - loads payer
@@ -67,7 +68,6 @@ The Go API currently supports the payment foundation:
 These are planned but not currently implemented:
 
 - `GET /payments/{payment_id}`.
-- Idempotency-key enforcement for `POST /payments/{payment_id}/capture`.
 - Redis-backed rate limiting.
 - Redis-backed idempotency response cache.
 - Durable PostgreSQL idempotency records.
@@ -90,13 +90,11 @@ POST /payments/{payment_id}/capture
 
 None currently.
 
-Payment authorization currently requires:
+Payment authorization and capture currently require:
 
 ```http
 Idempotency-Key: <key>
 ```
-
-Payment capture will require idempotency once capture idempotency is wired.
 
 Authentication has not been implemented yet.
 
@@ -335,19 +333,25 @@ payment.CapturePaymentInput{
 1. Client sends `POST /payments/{payment_id}/capture`.
 2. Router sends the request to `payment.Handler`.
 3. Handler reads `payment_id` from the chi route parameter.
-4. Handler calls `Service.CapturePayment(...)`.
-5. Service loads the payment.
-6. Service loads the hold by payment id.
-7. Service loads the payer referenced by the payment.
-8. Service rejects payments that are not `AUTHORIZED`.
-9. Service rejects authorizations past their expiry time.
-10. Service transitions the payment to `CAPTURED`.
-11. Service transitions the hold to `CAPTURED`.
-12. Service deducts the payment amount from payer held balance.
-13. Service persists the updated payer.
-14. Service persists the captured hold.
-15. Service persists the captured payment.
-16. Handler returns the capture response as JSON.
+4. Handler requires `Idempotency-Key`.
+5. Handler hashes the HTTP method, URL path, and request body.
+6. Handler starts an idempotency record.
+7. If the same key and request hash completed before, handler replays the stored response.
+8. If the same key is reused for a different payment path, handler returns `409`.
+9. Handler calls `Service.CapturePayment(...)`.
+10. Service loads the payment.
+11. Service loads the hold by payment id.
+12. Service loads the payer referenced by the payment.
+13. Service rejects payments that are not `AUTHORIZED`.
+14. Service rejects authorizations past their expiry time.
+15. Service transitions the payment to `CAPTURED`.
+16. Service transitions the hold to `CAPTURED`.
+17. Service deducts the payment amount from payer held balance.
+18. Service persists the updated payer.
+19. Service persists the captured hold.
+20. Service persists the captured payment.
+21. Handler records the successful response against the idempotency key.
+22. Handler returns the capture response as JSON.
 
 ### Diagram
 
@@ -360,6 +364,12 @@ internal/http chi router
   |
   v
 payment.Handler
+  |
+  +--> IdempotencyService.StartRequest
+  |       |
+  |       +--> create in-memory IN_PROGRESS record
+  |       +--> replay completed response when key/hash match
+  |       +--> reject key/hash mismatch
   |
   v
 Payment Service
@@ -378,6 +388,9 @@ Payment Service
   |
   v
 CapturePaymentResult
+  |
+  v
+IdempotencyService.CompleteRequest
 ```
 
 ### Failure Path
@@ -390,6 +403,9 @@ payment.ErrHoldNotFound
 payer.ErrPayerNotFound
 payment.ErrPaymentNotCapturable
 payment.ErrAuthorizationExpired
+idempotency.ErrRequestHashMismatch
+idempotency.ErrExpiredIdempotencyKey
+idempotency.ErrRequestInProgress
 ```
 
 Current HTTP error mapping:
@@ -400,7 +416,10 @@ missing hold            -> HTTP 404
 missing payer           -> HTTP 404
 not capturable          -> HTTP 409
 authorization expired    -> HTTP 422
-idempotency enforcement  -> planned
+missing idempotency key  -> HTTP 400
+idempotency conflict     -> HTTP 409
+idempotency key expired  -> HTTP 409
+idempotency in flight    -> HTTP 409
 rate limit exceeded      -> planned HTTP 429
 ```
 
@@ -471,6 +490,9 @@ Current tests cover:
 - payment authorization idempotency missing-key rejection
 - payment authorization idempotency replay
 - payment authorization idempotency conflict rejection
+- payment capture idempotency missing-key rejection
+- payment capture idempotency replay
+- payment capture idempotency conflict rejection across different payment paths
 - router-level `/payments/authorize` wiring
 - router-level `/payments/{payment_id}/capture` wiring
 - inactive merchant rejection
@@ -535,7 +557,7 @@ Planned. Will own durable PostgreSQL payment and hold persistence.
 - [x] Add payment capture service.
 - [x] Register `POST /payments/{payment_id}/capture`.
 - [x] Add local idempotency-key enforcement for authorization.
-- [ ] Add idempotency-key enforcement for capture.
+- [x] Add local idempotency-key enforcement for capture.
 - [ ] Add Redis-backed rate limiting.
 - [ ] Add PostgreSQL payment and hold migrations.
 - [ ] Add durable authorization transaction.

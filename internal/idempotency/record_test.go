@@ -2,6 +2,7 @@ package idempotency_test
 
 import (
 	"errors"
+	"net/http"
 	"testing"
 	"time"
 
@@ -163,6 +164,29 @@ func TestHashRequestBodyIsStable(t *testing.T) {
 
 	if first == third {
 		t.Fatal("expected different body to hash differently")
+	}
+}
+
+func TestHashRequestIncludesMethodAndPath(t *testing.T) {
+	first := idempotency.HashRequest(http.MethodPost, "/payments/pay_1/capture", nil)
+	second := idempotency.HashRequest(http.MethodPost, "/payments/pay_1/capture", nil)
+	differentPath := idempotency.HashRequest(http.MethodPost, "/payments/pay_2/capture", nil)
+	differentMethod := idempotency.HashRequest(http.MethodGet, "/payments/pay_1/capture", nil)
+
+	if first == "" {
+		t.Fatal("expected hash to be populated")
+	}
+
+	if first != second {
+		t.Fatalf("expected same method and path to hash equally, got %q and %q", first, second)
+	}
+
+	if first == differentPath {
+		t.Fatal("expected different path to hash differently")
+	}
+
+	if first == differentMethod {
+		t.Fatal("expected different method to hash differently")
 	}
 }
 

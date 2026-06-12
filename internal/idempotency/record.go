@@ -84,7 +84,18 @@ func (r Record) IsExpired(now time.Time) bool {
 	return !r.ExpiresAt.IsZero() && now.UTC().After(r.ExpiresAt)
 }
 
+func HashRequest(method string, path string, body []byte) string {
+	hash := sha256.New()
+
+	hash.Write([]byte(method))
+	hash.Write([]byte("\n"))
+	hash.Write([]byte(path))
+	hash.Write([]byte("\n"))
+	hash.Write(body)
+
+	return hex.EncodeToString(hash.Sum(nil))
+}
+
 func HashRequestBody(body []byte) string {
-	sum := sha256.Sum256(body)
-	return hex.EncodeToString(sum[:])
+	return HashRequest("", "", body)
 }
