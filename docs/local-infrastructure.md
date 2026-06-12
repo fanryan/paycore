@@ -138,7 +138,13 @@ go test ./...
 
 PostgreSQL and Redis integration tests are planned once the runtime adapters exist.
 
-Merchant and payer schema migrations are currently plain SQL and can be applied manually. A migration runner has not been selected yet.
+Schema migrations are plain SQL and are applied by the local `paycore-migrate` command.
+
+Run:
+
+```bash
+PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=disable' go run ./cmd/paycore-migrate
+```
 
 ## 7. File Guide
 
@@ -154,6 +160,10 @@ Documents local environment variables for API runtime and planned database/cache
 
 Documents how local services fit into the project roadmap.
 
+`cmd/paycore-migrate`
+
+Applies local PostgreSQL migrations and records applied files in `schema_migrations`.
+
 ## Checklist
 
 - [x] Add Docker Compose PostgreSQL service.
@@ -165,7 +175,7 @@ Documents how local services fit into the project roadmap.
 - [x] Add Redis config loading.
 - [x] Add PostgreSQL merchant and payer migrations.
 - [x] Add PostgreSQL payment and idempotency migrations.
-- [ ] Add migration runner.
+- [x] Add migration runner.
 - [ ] Add PostgreSQL repository adapters.
 - [ ] Add Redis rate limiter.
 - [ ] Add Redis idempotency response cache.

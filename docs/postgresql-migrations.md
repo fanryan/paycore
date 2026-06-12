@@ -12,6 +12,7 @@ The repository currently includes plain SQL migrations for:
 - Payer table creation in `migrations/000002_create_payers.sql`.
 - Payment and hold table creation in `migrations/000003_create_payments.sql`.
 - Idempotency record table creation in `migrations/000004_create_idempotency_records.sql`.
+- Migration runner command in `cmd/paycore-migrate`.
 
 The migrations define:
 
@@ -29,7 +30,6 @@ The migrations define:
 
 These are planned but not currently implemented:
 
-- Migration runner.
 - Automatic migration execution in app startup.
 - Settlement migrations.
 - Outbox migrations.
@@ -48,7 +48,7 @@ migrations/
   000004_create_idempotency_records.sql
 ```
 
-The files are intentionally plain SQL for now. A migration tool such as `golang-migrate`, `goose`, or a small custom runner can be selected after the initial schema shape is stable.
+The files are plain SQL and are applied by the local `paycore-migrate` command.
 
 ## 3. Merchant Schema
 
@@ -157,7 +157,31 @@ Current constraints:
 
 The response body is stored as `BYTEA` so the repository can replay the exact HTTP response payload.
 
-## 7. Current Runtime Relationship
+## 7. Migration Runner
+
+The migration runner lives at:
+
+```text
+cmd/paycore-migrate/main.go
+```
+
+It currently:
+
+- reads `PAYCORE_DATABASE_URL`
+- connects to PostgreSQL with `pgxpool`
+- creates `schema_migrations` if needed
+- reads `migrations/*.sql`
+- applies migrations in filename order
+- records applied migration filenames
+- skips already-applied migrations on later runs
+
+Run it with:
+
+```bash
+PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=disable' go run ./cmd/paycore-migrate
+```
+
+## 8. Current Runtime Relationship
 
 The PayCore API does not yet run these migrations or connect repositories to PostgreSQL.
 
@@ -172,7 +196,7 @@ idempotency memory repository
 
 The migrations exist to prepare for durable repository adapters.
 
-## 8. Manual Usage
+## 9. Manual Usage
 
 With local PostgreSQL running:
 
@@ -180,16 +204,13 @@ With local PostgreSQL running:
 docker compose up -d postgres
 ```
 
-The SQL can be applied manually for now:
+Apply migrations with:
 
 ```bash
-docker exec -i paycore-postgres psql -U paycore -d paycore < migrations/000001_create_merchants.sql
-docker exec -i paycore-postgres psql -U paycore -d paycore < migrations/000002_create_payers.sql
-docker exec -i paycore-postgres psql -U paycore -d paycore < migrations/000003_create_payments.sql
-docker exec -i paycore-postgres psql -U paycore -d paycore < migrations/000004_create_idempotency_records.sql
+PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=disable' go run ./cmd/paycore-migrate
 ```
 
-This manual flow is temporary until a migration runner is selected.
+Run the command repeatedly as needed. Already-applied migrations are skipped.
 
 ## Checklist
 
@@ -197,7 +218,7 @@ This manual flow is temporary until a migration runner is selected.
 - [x] Add payer table migration.
 - [x] Add payment and hold migrations.
 - [x] Add idempotency record migration.
-- [ ] Add migration runner.
+- [x] Add migration runner.
 - [ ] Add settlement migration.
 - [ ] Add outbox migration.
 - [ ] Add PostgreSQL repository adapters.

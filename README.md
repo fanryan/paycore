@@ -89,6 +89,12 @@ docker exec paycore-postgres pg_isready -U paycore -d paycore
 docker exec paycore-redis redis-cli ping
 ```
 
+Apply local PostgreSQL migrations:
+
+```bash
+PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=disable' go run ./cmd/paycore-migrate
+```
+
 Start the API server:
 
 ```bash
