@@ -38,7 +38,8 @@ Current development stage:
 - Payer HTTP create and list endpoints implemented
 - Payer balance reservation, release, and held-capture behavior implemented
 - Payment entity, authorization hold entity, repository interface, and in-memory adapter implemented
-- Payment authorization HTTP endpoint implemented without idempotency enforcement yet
+- In-memory idempotency record, service, repository interface, and memory adapter implemented
+- Payment authorization HTTP endpoint implemented with local in-memory `Idempotency-Key` enforcement
 - Payment capture service and HTTP endpoint implemented without idempotency enforcement yet
 - Shared currency normalization and validation implemented
 - Shared random id helper implemented
@@ -47,7 +48,7 @@ Current development stage:
 - Configuration tests added
 - Merchant and payer unit tests added
 - Merchant and payer handler tests added
-- Payment service, handler, repository, entity, hold, and router tests added
+- Payment service, handler, repository, entity, hold, idempotency, and router tests added
 
 Implemented endpoints:
 
@@ -65,7 +66,7 @@ POST /payments/{payment_id}/capture
 
 Infrastructure such as PostgreSQL, Redis, Kafka, Prometheus, Docker Compose, settlement processing, and outbox publishing has not been implemented yet.
 
-Payment authorization is currently local and in-memory. It does not yet enforce `Idempotency-Key`, Redis rate limiting, durable PostgreSQL transactions, or outbox event creation.
+Payment authorization is currently local and in-memory. It enforces `Idempotency-Key` through an in-memory repository, but does not yet use durable PostgreSQL idempotency records, Redis response caching, Redis rate limiting, durable PostgreSQL payment transactions, or outbox event creation.
 
 ## Run Locally
 
@@ -113,6 +114,7 @@ curl -i -X POST http://localhost:8080/payers \
 
 curl -i -X POST http://localhost:8080/payments/authorize \
   -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: demo-key-1' \
   -d '{"merchant_id":"merchant-1","payer_id":"payer-1","amount":4000,"currency":"usd"}'
 ```
 
@@ -138,6 +140,16 @@ paycore/
     paycore-api/
       main.go
   internal/
+    idempotency/
+      record.go
+      record_test.go
+      repository.go
+      service.go
+      service_test.go
+      adapters/
+        memory/
+          repository.go
+          repository_test.go
     http/
       middleware.go
       router.go
@@ -167,6 +179,7 @@ paycore/
       hold.go
       hold_test.go
       repository.go
+      response_recorder.go
       service.go
       service_test.go
       adapters/
@@ -186,6 +199,7 @@ paycore/
         id.go
   docs/
     architecture.md
+    idempotency.md
     merchant.md
     payer.md
     payment.md
@@ -269,6 +283,7 @@ stateDiagram-v2
 Current documentation:
 
 - `docs/architecture.md`
+- `docs/idempotency.md`
 - `docs/merchant.md`
 - `docs/payer.md`
 - `docs/payment.md`

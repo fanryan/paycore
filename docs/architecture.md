@@ -37,6 +37,8 @@ The current repository contains the first API foundation:
 - Payer balance mutation methods for reserve, release, and held capture.
 - Payment entity, authorization hold entity, repository interface, in-memory adapter, authorization service, and capture service.
 - Payment authorization and capture HTTP handlers.
+- In-memory idempotency record, repository interface, adapter, and service.
+- Local `Idempotency-Key` enforcement for payment authorization.
 - Shared HTTP JSON response helper.
 - Shared random id helper.
 - Unit tests for HTTP routing, configuration loading, currency helpers, merchant behavior, and payer behavior.
@@ -87,6 +89,9 @@ internal/payer
 internal/payment
   -> payment entity, hold entity, authorization and capture services, repository interface, memory adapter
 
+internal/idempotency
+  -> idempotency record, service, repository interface, memory adapter
+
 internal/shared/config
   -> environment-backed application configuration
 
@@ -133,16 +138,21 @@ Merchant and payer handlers currently use in-memory repositories. Their state is
 ## Current Payment Authorization Flow
 
 Payment authorization is currently exposed through `POST /payments/authorize`.
+It requires `Idempotency-Key` and stores local in-memory idempotency records.
 
 ```text
 Caller
   |
   | POST /payments/authorize
+  | Idempotency-Key: <key>
   v
-internal/http.Router
+internal/http chi router
   |
   v
 Payment Handler
+  |
+  +--> hash request body
+  +--> create or replay idempotency record
   |
   v
 Payment Service
@@ -156,6 +166,7 @@ Payment Service
   +--> create AUTHORIZED payment
   +--> reserve payer balance
   +--> persist payer, hold, and payment in memory
+  +--> complete idempotency record with response
 ```
 
 ## Current Payment Capture Flow
@@ -186,4 +197,4 @@ Payment Service
   +--> persist payer, hold, and payment in memory
 ```
 
-Because these flows are still in-memory, they are not transactionally durable. They also do not yet enforce `Idempotency-Key` or Redis rate limiting. PostgreSQL will later make payer balance mutation, hold mutation, payment mutation, idempotency, and outbox event creation part of one transaction.
+Because these flows are still in-memory, they are not transactionally durable. Authorization now enforces `Idempotency-Key` locally, but the idempotency record is also in-memory and is lost on restart. Capture does not yet enforce idempotency. PostgreSQL will later make payer balance mutation, hold mutation, payment mutation, idempotency, and outbox event creation part of one transaction.

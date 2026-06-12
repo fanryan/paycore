@@ -35,6 +35,7 @@ The Go API currently supports the payment foundation:
 - Payer balance reserve, release, and held-capture behavior.
 - Local random id generation through `internal/shared/id`.
 - In-memory repository support for payments and holds.
+- In-memory `Idempotency-Key` enforcement for `POST /payments/authorize`.
 - Internal authorization service that:
   - loads merchant
   - loads payer
@@ -56,6 +57,7 @@ The Go API currently supports the payment foundation:
   - persists payer, hold, and payment through in-memory repositories
 - Payment authorization HTTP handler in `internal/payment/handler.go`.
 - Payment capture HTTP handler in `internal/payment/handler.go`.
+- Payment authorization response recording in `internal/payment/response_recorder.go` for local idempotency replay.
 - `POST /payments/authorize` route composed through `internal/http/router.go`.
 - `POST /payments/{payment_id}/capture` route composed through `internal/http/router.go`.
 - Entity, hold, repository, service, handler, and router tests.
@@ -65,9 +67,10 @@ The Go API currently supports the payment foundation:
 These are planned but not currently implemented:
 
 - `GET /payments/{payment_id}`.
-- Idempotency-key enforcement.
+- Idempotency-key enforcement for `POST /payments/{payment_id}/capture`.
 - Redis-backed rate limiting.
 - Redis-backed idempotency response cache.
+- Durable PostgreSQL idempotency records.
 - PostgreSQL payment repository.
 - PostgreSQL payer balance transaction.
 - Payment database migrations.
@@ -87,11 +90,13 @@ POST /payments/{payment_id}/capture
 
 None currently.
 
-Payment mutation endpoints will eventually require:
+Payment authorization currently requires:
 
 ```http
 Idempotency-Key: <key>
 ```
+
+Payment capture will require idempotency once capture idempotency is wired.
 
 Authentication has not been implemented yet.
 
@@ -179,22 +184,29 @@ payment.AuthorizePaymentInput{
 
 1. Client sends `POST /payments/authorize`.
 2. Router sends the request to `payment.Handler`.
-3. Handler decodes JSON into `AuthorizePaymentRequest`.
-4. Handler calls `Service.AuthorizePayment(...)`.
-5. Service loads the merchant through `merchant.MerchantRepository`.
-6. Service checks `Merchant.CanCreatePayments()`.
-7. Service loads the payer through `payer.PayerRepository`.
-8. Service checks payer currency against the requested payment currency.
-9. Service checks payer available balance through `Payer.CanAuthorize(...)`.
-10. Service generates a local payment id with prefix `pay`.
-11. Service generates a local hold id with prefix `hold`.
-12. Service creates a `HELD` authorization hold.
-13. Service creates an `AUTHORIZED` payment with a 15-minute expiry.
-14. Service reserves payer funds by moving amount from available balance to held balance.
-15. Service persists the updated payer.
-16. Service persists the hold.
-17. Service persists the payment.
-18. Handler returns the authorization response as JSON.
+3. Handler reads the request body.
+4. Handler requires `Idempotency-Key`.
+5. Handler hashes the request body.
+6. Handler starts an idempotency record.
+7. If the same key and request hash completed before, handler replays the stored response.
+8. If the same key is reused with a different request hash, handler returns `409`.
+9. Handler decodes JSON into `AuthorizePaymentRequest`.
+10. Handler calls `Service.AuthorizePayment(...)`.
+11. Service loads the merchant through `merchant.MerchantRepository`.
+12. Service checks `Merchant.CanCreatePayments()`.
+13. Service loads the payer through `payer.PayerRepository`.
+14. Service checks payer currency against the requested payment currency.
+15. Service checks payer available balance through `Payer.CanAuthorize(...)`.
+16. Service generates a local payment id with prefix `pay`.
+17. Service generates a local hold id with prefix `hold`.
+18. Service creates a `HELD` authorization hold.
+19. Service creates an `AUTHORIZED` payment with a 15-minute expiry.
+20. Service reserves payer funds by moving amount from available balance to held balance.
+21. Service persists the updated payer.
+22. Service persists the hold.
+23. Service persists the payment.
+24. Handler records the successful response against the idempotency key.
+25. Handler returns the authorization response as JSON.
 
 ### Diagram
 
@@ -207,6 +219,12 @@ internal/http router
   |
   v
 payment.Handler
+  |
+  +--> IdempotencyService.StartRequest
+  |       |
+  |       +--> create in-memory IN_PROGRESS record
+  |       +--> replay completed response when key/hash match
+  |       +--> reject key/hash mismatch
   |
   v
 Payment Service
@@ -229,6 +247,9 @@ Payment Service
   |
   v
 AuthorizePaymentResult
+  |
+  v
+IdempotencyService.CompleteRequest
 ```
 
 ### Failure Path
@@ -241,6 +262,9 @@ payer.ErrPayerNotFound
 payment.ErrMerchantCannotCreatePayments
 payment.ErrPayerCurrencyMismatch
 payment.ErrInsufficientAvailableBalance
+idempotency.ErrRequestHashMismatch
+idempotency.ErrExpiredIdempotencyKey
+idempotency.ErrRequestInProgress
 ```
 
 Current HTTP error mapping:
@@ -251,7 +275,10 @@ missing payer                 -> HTTP 404
 inactive merchant             -> HTTP 422 or 409
 currency mismatch             -> HTTP 422
 insufficient available balance -> HTTP 422
-idempotency conflict          -> planned HTTP 409
+missing idempotency key       -> HTTP 400
+idempotency conflict          -> HTTP 409
+idempotency key expired       -> HTTP 409
+idempotency request in flight -> HTTP 409
 rate limit exceeded           -> planned HTTP 429
 ```
 
@@ -372,9 +399,9 @@ missing payment         -> HTTP 404
 missing hold            -> HTTP 404
 missing payer           -> HTTP 404
 not capturable          -> HTTP 409
-authorization expired   -> HTTP 422
-idempotency conflict    -> planned HTTP 409
-rate limit exceeded     -> planned HTTP 429
+authorization expired    -> HTTP 422
+idempotency enforcement  -> planned
+rate limit exceeded      -> planned HTTP 429
 ```
 
 ## 7. Persistence
@@ -392,6 +419,8 @@ map[string]string // hold id by payment id
 It uses a mutex for concurrent map access and checks `context.Context` before work.
 
 This adapter is useful for local service development before PostgreSQL exists. It is not durable.
+
+The current idempotency adapter also stores records in memory. This supports local replay behavior while developing the API contract, but duplicate protection is lost on process restart.
 
 ### Current Consistency Limitation
 
@@ -439,6 +468,9 @@ Current tests cover:
 - payment authorization handler error mapping
 - payment capture handler success path
 - payment capture handler error mapping
+- payment authorization idempotency missing-key rejection
+- payment authorization idempotency replay
+- payment authorization idempotency conflict rejection
 - router-level `/payments/authorize` wiring
 - router-level `/payments/{payment_id}/capture` wiring
 - inactive merchant rejection
@@ -480,6 +512,10 @@ It also defines payment capture orchestration across payment, hold, and payer ba
 
 Owns payment authorization and capture HTTP request parsing, response mapping, and HTTP error mapping.
 
+`internal/payment/response_recorder.go`
+
+Captures HTTP response status and body so successful authorization responses can be stored for idempotency replay.
+
 `internal/payment/adapters/memory/repository.go`
 
 Provides the current non-durable in-memory payment repository implementation.
@@ -498,7 +534,8 @@ Planned. Will own durable PostgreSQL payment and hold persistence.
 - [x] Register `POST /payments/authorize`.
 - [x] Add payment capture service.
 - [x] Register `POST /payments/{payment_id}/capture`.
-- [ ] Add idempotency-key enforcement.
+- [x] Add local idempotency-key enforcement for authorization.
+- [ ] Add idempotency-key enforcement for capture.
 - [ ] Add Redis-backed rate limiting.
 - [ ] Add PostgreSQL payment and hold migrations.
 - [ ] Add durable authorization transaction.
