@@ -13,7 +13,7 @@ The repository currently provides Docker Compose services for:
 - Persistent Docker volumes for PostgreSQL and Redis.
 - Health checks for PostgreSQL and Redis.
 - Local environment template in `.env.example`.
-- PostgreSQL merchant and payer schema migrations.
+- PostgreSQL merchant, payer, payment, hold, and idempotency schema migrations.
 
 Current services:
 
@@ -164,7 +164,7 @@ Documents how local services fit into the project roadmap.
 - [x] Add database config loading.
 - [x] Add Redis config loading.
 - [x] Add PostgreSQL merchant and payer migrations.
-- [ ] Add PostgreSQL payment and idempotency migrations.
+- [x] Add PostgreSQL payment and idempotency migrations.
 - [ ] Add migration runner.
 - [ ] Add PostgreSQL repository adapters.
 - [ ] Add Redis rate limiter.

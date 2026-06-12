@@ -36,7 +36,7 @@ Current development stage:
 - Feature-first package layout introduced for merchant and payer modules
 - Merchant entity, service, repository interface, and in-memory adapter implemented
 - Payer entity, service, repository interface, and in-memory adapter implemented
-- PostgreSQL merchant and payer schema migrations added
+- PostgreSQL merchant, payer, payment, hold, and idempotency schema migrations added
 - Merchant HTTP create and list endpoints implemented
 - Payer HTTP create and list endpoints implemented
 - Payer balance reservation, release, and held-capture behavior implemented
@@ -229,6 +229,8 @@ paycore/
   migrations/
     000001_create_merchants.sql
     000002_create_payers.sql
+    000003_create_payments.sql
+    000004_create_idempotency_records.sql
   go.mod
   docker-compose.yml
   .env.example

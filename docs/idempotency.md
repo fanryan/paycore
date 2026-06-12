@@ -330,6 +330,7 @@ Captures response status and body for payment authorization and capture replay.
 - [x] Replay same key and same request hash.
 - [x] Reject same key and different request hash.
 - [x] Enforce `Idempotency-Key` on payment capture.
+- [x] Add PostgreSQL idempotency record migration.
 - [ ] Add PostgreSQL durable idempotency records.
 - [ ] Add Redis idempotency response cache.
 - [ ] Add idempotency metrics.

@@ -42,7 +42,7 @@ The current repository contains the first API foundation:
 - In-memory idempotency record, repository interface, adapter, and service.
 - Local `Idempotency-Key` enforcement for payment authorization and capture.
 - Docker Compose local PostgreSQL and Redis services for upcoming infrastructure work.
-- PostgreSQL merchant and payer schema migrations.
+- PostgreSQL merchant, payer, payment, hold, and idempotency schema migrations.
 - Shared HTTP JSON response helper.
 - Shared random id helper.
 - Unit tests for HTTP routing, configuration loading, currency helpers, merchant behavior, and payer behavior.
@@ -224,4 +224,4 @@ paycore-redis
 
 These services are not connected to the API yet. They exist to support the upcoming PostgreSQL repository adapters, durable idempotency records, Redis rate limiting, and Redis idempotency response caching.
 
-The repository also includes initial plain SQL migrations for merchant and payer tables. A migration runner has not been selected yet.
+The repository also includes initial plain SQL migrations for merchant, payer, payment, hold, and idempotency tables. A migration runner has not been selected yet.

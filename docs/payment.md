@@ -73,7 +73,6 @@ These are planned but not currently implemented:
 - Durable PostgreSQL idempotency records.
 - PostgreSQL payment repository.
 - PostgreSQL payer balance transaction.
-- Payment database migrations.
 - Transactional outbox event creation.
 - Kafka event publishing.
 - Authorization expiry worker.
@@ -559,6 +558,6 @@ Planned. Will own durable PostgreSQL payment and hold persistence.
 - [x] Add local idempotency-key enforcement for authorization.
 - [x] Add local idempotency-key enforcement for capture.
 - [ ] Add Redis-backed rate limiting.
-- [ ] Add PostgreSQL payment and hold migrations.
+- [x] Add PostgreSQL payment and hold migrations.
 - [ ] Add durable authorization transaction.
 - [ ] Add transactional outbox event for `payment.authorized`.
