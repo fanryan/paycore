@@ -11,6 +11,8 @@ type Config struct {
 	HTTPAddr              string
 	HTTPReadHeaderTimeout time.Duration
 	HTTPShutdownTimeout   time.Duration
+	DatabaseURL           string
+	RedisAddr             string
 }
 
 func Load() Config {
@@ -19,6 +21,8 @@ func Load() Config {
 		HTTPAddr:              getenv("PAYCORE_HTTP_ADDR", ":8080"),
 		HTTPReadHeaderTimeout: durationSeconds("PAYCORE_HTTP_READ_HEADER_TIMEOUT_SECONDS", 5*time.Second),
 		HTTPShutdownTimeout:   durationSeconds("PAYCORE_HTTP_SHUTDOWN_TIMEOUT_SECONDS", 10*time.Second),
+		DatabaseURL:           getenv("PAYCORE_DATABASE_URL", ""),
+		RedisAddr:             getenv("PAYCORE_REDIS_ADDR", "localhost:6379"),
 	}
 }
 

@@ -30,7 +30,7 @@ The current repository contains the first API foundation:
 - Panic recovery middleware with structured JSON errors.
 - Request body size limit middleware using a 1 MiB default.
 - Structured JSON error response shape.
-- Configuration loading from environment variables.
+- Configuration loading from environment variables, including planned PostgreSQL and Redis settings.
 - Shared currency normalization and validation.
 - Merchant entity, service, repository interface, and in-memory adapter.
 - Payer entity, service, repository interface, and in-memory adapter.
@@ -54,8 +54,8 @@ Current supported configuration:
 | `PAYCORE_HTTP_ADDR` | `:8080` | HTTP listen address |
 | `PAYCORE_HTTP_READ_HEADER_TIMEOUT_SECONDS` | `5` | HTTP read header timeout in seconds |
 | `PAYCORE_HTTP_SHUTDOWN_TIMEOUT_SECONDS` | `10` | Graceful shutdown timeout in seconds |
-| `PAYCORE_DATABASE_URL` | none | Planned PostgreSQL connection string |
-| `PAYCORE_REDIS_ADDR` | none | Planned Redis address |
+| `PAYCORE_DATABASE_URL` | empty | PostgreSQL connection string loaded for upcoming repository adapters |
+| `PAYCORE_REDIS_ADDR` | `localhost:6379` | Redis address loaded for upcoming rate limiting and cache adapters |
 
 ## High-Level Flow
 

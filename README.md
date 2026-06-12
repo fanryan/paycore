@@ -32,7 +32,7 @@ Current development stage:
 - Panic recovery middleware implemented
 - Request body size limit middleware implemented
 - JSON error response shape introduced
-- Configuration loading implemented for environment, HTTP address, and server timeouts
+- Configuration loading implemented for environment, HTTP server settings, PostgreSQL URL, and Redis address
 - Feature-first package layout introduced for merchant and payer modules
 - Merchant entity, service, repository interface, and in-memory adapter implemented
 - Payer entity, service, repository interface, and in-memory adapter implemented
@@ -110,8 +110,8 @@ Supported local configuration:
 | `PAYCORE_HTTP_ADDR` | `:8080` | HTTP listen address |
 | `PAYCORE_HTTP_READ_HEADER_TIMEOUT_SECONDS` | `5` | HTTP read header timeout in seconds |
 | `PAYCORE_HTTP_SHUTDOWN_TIMEOUT_SECONDS` | `10` | Graceful shutdown timeout in seconds |
-| `PAYCORE_DATABASE_URL` | none | Planned PostgreSQL connection string |
-| `PAYCORE_REDIS_ADDR` | none | Planned Redis address |
+| `PAYCORE_DATABASE_URL` | empty | PostgreSQL connection string loaded for upcoming repository adapters |
+| `PAYCORE_REDIS_ADDR` | `localhost:6379` | Redis address loaded for upcoming rate limiting and cache adapters |
 
 Test the current endpoints:
 

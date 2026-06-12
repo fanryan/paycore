@@ -123,7 +123,7 @@ PAYCORE_DATABASE_URL=postgres://paycore:paycore@localhost:5432/paycore?sslmode=d
 PAYCORE_REDIS_ADDR=localhost:6379
 ```
 
-The app currently reads only the HTTP configuration values. Database and Redis configuration values are placeholders for the upcoming adapter work.
+The app currently loads the database URL and Redis address into shared configuration, but does not connect to PostgreSQL or Redis at runtime yet.
 
 ## 6. Tests
 
@@ -158,8 +158,8 @@ Documents how local services fit into the project roadmap.
 - [x] Add local persistent Docker volumes.
 - [x] Add service health checks.
 - [x] Add `.env.example`.
-- [ ] Add database config loading.
-- [ ] Add Redis config loading.
+- [x] Add database config loading.
+- [x] Add Redis config loading.
 - [ ] Add PostgreSQL migrations.
 - [ ] Add PostgreSQL repository adapters.
 - [ ] Add Redis rate limiter.
