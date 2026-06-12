@@ -46,6 +46,8 @@ Current development stage:
 - Shared currency normalization and validation implemented
 - Shared random id helper implemented
 - Central HTTP router migrated to chi for path parameters and feature route composition
+- Docker Compose local PostgreSQL and Redis infrastructure added
+- `.env.example` added for local runtime configuration
 - HTTP API foundation and middleware tests added
 - Configuration tests added
 - Merchant and payer unit tests added
@@ -66,11 +68,25 @@ POST /payments/authorize
 POST /payments/{payment_id}/capture
 ```
 
-Infrastructure such as PostgreSQL, Redis, Kafka, Prometheus, Docker Compose, settlement processing, and outbox publishing has not been implemented yet.
+Runtime integration with PostgreSQL, Redis, Kafka, Prometheus, settlement processing, and outbox publishing has not been implemented yet. Docker Compose currently starts local PostgreSQL and Redis for upcoming persistence and cache work.
 
 Payment authorization and capture are currently local and in-memory. They enforce `Idempotency-Key` through an in-memory repository, but do not yet use durable PostgreSQL idempotency records, Redis response caching, Redis rate limiting, durable PostgreSQL payment transactions, or outbox event creation.
 
 ## Run Locally
+
+Start local infrastructure:
+
+```bash
+docker compose up -d
+docker compose ps
+```
+
+Optional health checks:
+
+```bash
+docker exec paycore-postgres pg_isready -U paycore -d paycore
+docker exec paycore-redis redis-cli ping
+```
 
 Start the API server:
 
@@ -94,6 +110,8 @@ Supported local configuration:
 | `PAYCORE_HTTP_ADDR` | `:8080` | HTTP listen address |
 | `PAYCORE_HTTP_READ_HEADER_TIMEOUT_SECONDS` | `5` | HTTP read header timeout in seconds |
 | `PAYCORE_HTTP_SHUTDOWN_TIMEOUT_SECONDS` | `10` | Graceful shutdown timeout in seconds |
+| `PAYCORE_DATABASE_URL` | none | Planned PostgreSQL connection string |
+| `PAYCORE_REDIS_ADDR` | none | Planned Redis address |
 
 Test the current endpoints:
 
@@ -203,10 +221,13 @@ paycore/
   docs/
     architecture.md
     idempotency.md
+    local-infrastructure.md
     merchant.md
     payer.md
     payment.md
   go.mod
+  docker-compose.yml
+  .env.example
   README.md
 ```
 
@@ -287,6 +308,7 @@ Current documentation:
 
 - `docs/architecture.md`
 - `docs/idempotency.md`
+- `docs/local-infrastructure.md`
 - `docs/merchant.md`
 - `docs/payer.md`
 - `docs/payment.md`

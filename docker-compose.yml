@@ -1,0 +1,35 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: paycore-postgres
+    environment:
+      POSTGRES_DB: paycore
+      POSTGRES_USER: paycore
+      POSTGRES_PASSWORD: paycore
+    ports:
+      - "5432:5432"
+    volumes:
+      - paycore_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U paycore -d paycore"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: paycore-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - paycore_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  paycore_postgres_data:
+  paycore_redis_data:

@@ -41,6 +41,7 @@ The current repository contains the first API foundation:
 - Payment authorization and capture HTTP handlers.
 - In-memory idempotency record, repository interface, adapter, and service.
 - Local `Idempotency-Key` enforcement for payment authorization and capture.
+- Docker Compose local PostgreSQL and Redis services for upcoming infrastructure work.
 - Shared HTTP JSON response helper.
 - Shared random id helper.
 - Unit tests for HTTP routing, configuration loading, currency helpers, merchant behavior, and payer behavior.
@@ -53,6 +54,8 @@ Current supported configuration:
 | `PAYCORE_HTTP_ADDR` | `:8080` | HTTP listen address |
 | `PAYCORE_HTTP_READ_HEADER_TIMEOUT_SECONDS` | `5` | HTTP read header timeout in seconds |
 | `PAYCORE_HTTP_SHUTDOWN_TIMEOUT_SECONDS` | `10` | Graceful shutdown timeout in seconds |
+| `PAYCORE_DATABASE_URL` | none | Planned PostgreSQL connection string |
+| `PAYCORE_REDIS_ADDR` | none | Planned Redis address |
 
 ## High-Level Flow
 
@@ -208,3 +211,14 @@ Payment Service
 ```
 
 Because these flows are still in-memory, they are not transactionally durable. Authorization and capture now enforce `Idempotency-Key` locally, but the idempotency record is also in-memory and is lost on restart. PostgreSQL will later make payer balance mutation, hold mutation, payment mutation, idempotency, and outbox event creation part of one transaction.
+
+## Current Local Infrastructure
+
+Docker Compose currently provides local PostgreSQL and Redis services:
+
+```text
+paycore-postgres
+paycore-redis
+```
+
+These services are not connected to the API yet. They exist to support the upcoming PostgreSQL repository adapters, durable idempotency records, Redis rate limiting, and Redis idempotency response caching.

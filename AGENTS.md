@@ -44,6 +44,7 @@ PayCore must not integrate with real card networks, banks, or payment rails.
 - PostgreSQL is the durable source of truth.
 - Redis improves latency and admission control, but correctness must not depend on Redis durability.
 - Kafka propagates lifecycle events after durable commit. Kafka is not the source of truth.
+- Docker Compose may provide local services before the app is wired to them; docs must clearly distinguish available infrastructure from runtime integration.
 - Payment mutation endpoints must require an `Idempotency-Key` header.
 - Duplicate idempotency key with the same request hash returns the original response.
 - Duplicate idempotency key with a different request hash returns `409 IDEMPOTENCY_KEY_CONFLICT`.
