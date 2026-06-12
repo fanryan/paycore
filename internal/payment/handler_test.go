@@ -14,6 +14,7 @@ import (
 	payermemory "github.com/fanryan/paycore/internal/payer/adapters/memory"
 	"github.com/fanryan/paycore/internal/payment"
 	paymentmemory "github.com/fanryan/paycore/internal/payment/adapters/memory"
+	"github.com/go-chi/chi/v5"
 )
 
 func TestHandlerAuthorizesPayment(t *testing.T) {
@@ -150,8 +151,83 @@ func TestHandlerRejectsUnsupportedMethod(t *testing.T) {
 	}
 }
 
+func TestHandlerCapturesPayment(t *testing.T) {
+	fixture := newHandlerFixture(t)
+
+	authorizeRequest := httptest.NewRequest(http.MethodPost, "/payments/authorize", bytes.NewBufferString(`{
+		"merchant_id": "merchant-1",
+		"payer_id": "payer-1",
+		"amount": 4000,
+		"currency": "usd"
+	}`))
+	authorizeResponse := httptest.NewRecorder()
+
+	fixture.handler.ServeHTTP(authorizeResponse, authorizeRequest)
+	if authorizeResponse.Code != http.StatusCreated {
+		t.Fatalf("expected authorize status %d, got %d", http.StatusCreated, authorizeResponse.Code)
+	}
+
+	var authorizeBody payment.AuthorizePaymentResponse
+	decodeJSON(t, authorizeResponse, &authorizeBody)
+
+	captureRequest := httptest.NewRequest(http.MethodPost, "/payments/"+authorizeBody.PaymentID+"/capture", nil)
+	captureResponse := httptest.NewRecorder()
+
+	fixture.router.ServeHTTP(captureResponse, captureRequest)
+
+	if captureResponse.Code != http.StatusOK {
+		t.Fatalf("expected capture status %d, got %d", http.StatusOK, captureResponse.Code)
+	}
+
+	assertJSONContentType(t, captureResponse)
+
+	var captureBody payment.CapturePaymentResponse
+	decodeJSON(t, captureResponse, &captureBody)
+
+	if captureBody.PaymentID != authorizeBody.PaymentID {
+		t.Fatalf("expected payment id %q, got %q", authorizeBody.PaymentID, captureBody.PaymentID)
+	}
+
+	if captureBody.Status != "CAPTURED" {
+		t.Fatalf("expected status CAPTURED, got %q", captureBody.Status)
+	}
+
+	if captureBody.CapturedAmount != 4_000 {
+		t.Fatalf("expected captured amount 4000, got %d", captureBody.CapturedAmount)
+	}
+
+	if captureBody.Currency != "USD" {
+		t.Fatalf("expected currency USD, got %q", captureBody.Currency)
+	}
+
+	if captureBody.CapturedAt == "" {
+		t.Fatal("expected captured_at")
+	}
+}
+
+func TestHandlerRejectsMissingPaymentOnCapture(t *testing.T) {
+	fixture := newHandlerFixture(t)
+
+	request := httptest.NewRequest(http.MethodPost, "/payments/missing/capture", nil)
+	response := httptest.NewRecorder()
+
+	fixture.router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("expected status %d, got %d", http.StatusNotFound, response.Code)
+	}
+
+	var body map[string]string
+	decodeJSON(t, response, &body)
+
+	if body["error_code"] != "PAYMENT_NOT_FOUND" {
+		t.Fatalf("expected PAYMENT_NOT_FOUND, got %q", body["error_code"])
+	}
+}
+
 type handlerFixture struct {
 	handler *payment.Handler
+	router  http.Handler
 }
 
 func newHandlerFixture(t *testing.T) handlerFixture {
@@ -180,9 +256,13 @@ func newHandlerFixture(t *testing.T) handlerFixture {
 	}
 
 	service := payment.NewService(merchantRepository, payerRepository, paymentRepository)
+	handler := payment.NewHandler(service)
+	router := chi.NewRouter()
+	router.Post("/payments/{payment_id}/capture", handler.HandleCapture)
 
 	return handlerFixture{
-		handler: payment.NewHandler(service),
+		handler: handler,
+		router:  router,
 	}
 }
 

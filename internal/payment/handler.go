@@ -8,6 +8,7 @@ import (
 	"github.com/fanryan/paycore/internal/merchant"
 	"github.com/fanryan/paycore/internal/payer"
 	"github.com/fanryan/paycore/internal/shared/httpjson"
+	"github.com/go-chi/chi/v5"
 )
 
 type Handler struct {
@@ -33,6 +34,14 @@ type AuthorizePaymentResponse struct {
 	ExpiresAt    string `json:"expires_at"`
 }
 
+type CapturePaymentResponse struct {
+	PaymentID      string `json:"payment_id"`
+	Status         string `json:"status"`
+	CapturedAmount int64  `json:"captured_amount"`
+	Currency       string `json:"currency"`
+	CapturedAt     string `json:"captured_at"`
+}
+
 func NewHandler(service *Service) *Handler {
 	return &Handler{
 		service: service,
@@ -40,7 +49,19 @@ func NewHandler(service *Service) *Handler {
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	h.HandleAuthorize(w, r)
+	switch {
+	case r.URL.Path == "/payments/authorize":
+		h.HandleAuthorize(w, r)
+		return
+	case chi.URLParam(r, "payment_id") != "":
+		h.HandleCapture(w, r)
+		return
+	}
+
+	httpjson.Write(w, http.StatusNotFound, map[string]string{
+		"error_code": "PAYMENT_ROUTE_NOT_FOUND",
+		"message":    "Payment route not found",
+	})
 }
 
 func (h *Handler) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
@@ -74,6 +95,36 @@ func (h *Handler) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 	}
 
 	httpjson.Write(w, http.StatusCreated, authorizePaymentResponse(result))
+}
+
+func (h *Handler) HandleCapture(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		httpjson.Write(w, http.StatusMethodNotAllowed, map[string]string{
+			"error_code": "METHOD_NOT_ALLOWED",
+			"message":    "Method not allowed",
+		})
+		return
+	}
+
+	paymentID := chi.URLParam(r, "payment_id")
+	if paymentID == "" {
+		httpjson.Write(w, http.StatusNotFound, map[string]string{
+			"error_code": "PAYMENT_ROUTE_NOT_FOUND",
+			"message":    "Payment route not found",
+		})
+		return
+	}
+
+	result, err := h.service.CapturePayment(r.Context(), CapturePaymentInput{
+		PaymentID: paymentID,
+	})
+	if err != nil {
+		status, body := captureErrorResponse(err)
+		httpjson.Write(w, status, body)
+		return
+	}
+
+	httpjson.Write(w, http.StatusOK, capturePaymentResponse(result))
 }
 
 func authorizationErrorResponse(err error) (int, map[string]string) {
@@ -111,6 +162,41 @@ func authorizationErrorResponse(err error) (int, map[string]string) {
 	}
 }
 
+func captureErrorResponse(err error) (int, map[string]string) {
+	switch {
+	case errors.Is(err, ErrPaymentNotFound):
+		return http.StatusNotFound, map[string]string{
+			"error_code": "PAYMENT_NOT_FOUND",
+			"message":    "Payment not found",
+		}
+	case errors.Is(err, ErrHoldNotFound):
+		return http.StatusNotFound, map[string]string{
+			"error_code": "PAYMENT_HOLD_NOT_FOUND",
+			"message":    "Payment hold not found",
+		}
+	case errors.Is(err, payer.ErrPayerNotFound):
+		return http.StatusNotFound, map[string]string{
+			"error_code": "PAYER_NOT_FOUND",
+			"message":    "Payer not found",
+		}
+	case errors.Is(err, ErrPaymentNotCapturable):
+		return http.StatusConflict, map[string]string{
+			"error_code": "PAYMENT_NOT_CAPTURABLE",
+			"message":    "Payment is not capturable",
+		}
+	case errors.Is(err, ErrAuthorizationExpired):
+		return http.StatusUnprocessableEntity, map[string]string{
+			"error_code": "AUTHORIZATION_EXPIRED",
+			"message":    "Authorization has expired",
+		}
+	default:
+		return http.StatusBadRequest, map[string]string{
+			"error_code": "INVALID_PAYMENT_CAPTURE",
+			"message":    err.Error(),
+		}
+	}
+}
+
 func authorizePaymentResponse(result AuthorizePaymentResult) AuthorizePaymentResponse {
 	return AuthorizePaymentResponse{
 		PaymentID:    result.Payment.ID,
@@ -122,5 +208,20 @@ func authorizePaymentResponse(result AuthorizePaymentResult) AuthorizePaymentRes
 		HoldID:       result.Hold.ID,
 		AuthorizedAt: result.Payment.AuthorizedAt.Format("2006-01-02T15:04:05Z07:00"),
 		ExpiresAt:    result.Payment.ExpiresAt.Format("2006-01-02T15:04:05Z07:00"),
+	}
+}
+
+func capturePaymentResponse(result CapturePaymentResult) CapturePaymentResponse {
+	capturedAt := ""
+	if result.Payment.CapturedAt != nil {
+		capturedAt = result.Payment.CapturedAt.Format("2006-01-02T15:04:05Z07:00")
+	}
+
+	return CapturePaymentResponse{
+		PaymentID:      result.Payment.ID,
+		Status:         string(result.Payment.Status),
+		CapturedAmount: result.Payment.AmountMinor,
+		Currency:       result.Payment.Currency,
+		CapturedAt:     capturedAt,
 	}
 }

@@ -177,6 +177,177 @@ func TestServiceRejectsInsufficientAvailableBalance(t *testing.T) {
 	}
 }
 
+func TestServiceCapturesPayment(t *testing.T) {
+	ctx := context.Background()
+	fixture := newFixture(t)
+
+	authorized := authorizePayment(t, fixture)
+
+	result, err := fixture.service.CapturePayment(ctx, payment.CapturePaymentInput{
+		PaymentID: authorized.Payment.ID,
+	})
+	if err != nil {
+		t.Fatalf("expected capture to succeed, got error: %v", err)
+	}
+
+	if result.Payment.Status != payment.StatusCaptured {
+		t.Fatalf("expected payment status CAPTURED, got %q", result.Payment.Status)
+	}
+
+	if result.Payment.CapturedAt == nil {
+		t.Fatal("expected captured at to be set")
+	}
+
+	if result.Hold.Status != payment.HoldStatusCaptured {
+		t.Fatalf("expected hold status CAPTURED, got %q", result.Hold.Status)
+	}
+
+	if result.Payer.AvailableBalanceMinor != 6_000 {
+		t.Fatalf("expected available balance 6000, got %d", result.Payer.AvailableBalanceMinor)
+	}
+
+	if result.Payer.HeldBalanceMinor != 0 {
+		t.Fatalf("expected held balance 0, got %d", result.Payer.HeldBalanceMinor)
+	}
+
+	storedPayment, err := fixture.payments.GetPayment(ctx, authorized.Payment.ID)
+	if err != nil {
+		t.Fatalf("expected stored payment, got error: %v", err)
+	}
+
+	if storedPayment.Status != payment.StatusCaptured {
+		t.Fatalf("expected stored payment status CAPTURED, got %q", storedPayment.Status)
+	}
+
+	storedHold, err := fixture.payments.GetHoldByPaymentID(ctx, authorized.Payment.ID)
+	if err != nil {
+		t.Fatalf("expected stored hold, got error: %v", err)
+	}
+
+	if storedHold.Status != payment.HoldStatusCaptured {
+		t.Fatalf("expected stored hold status CAPTURED, got %q", storedHold.Status)
+	}
+
+	storedPayer, err := fixture.payers.GetPayer(ctx, "payer-1")
+	if err != nil {
+		t.Fatalf("expected stored payer, got error: %v", err)
+	}
+
+	if storedPayer.HeldBalanceMinor != 0 {
+		t.Fatalf("expected stored held balance 0, got %d", storedPayer.HeldBalanceMinor)
+	}
+}
+
+func TestServiceRejectsMissingPaymentOnCapture(t *testing.T) {
+	fixture := newFixture(t)
+
+	_, err := fixture.service.CapturePayment(context.Background(), payment.CapturePaymentInput{
+		PaymentID: "missing",
+	})
+	if !errors.Is(err, payment.ErrPaymentNotFound) {
+		t.Fatalf("expected ErrPaymentNotFound, got %v", err)
+	}
+}
+
+func TestServiceRejectsMissingHoldOnCapture(t *testing.T) {
+	ctx := context.Background()
+	fixture := newFixture(t)
+	paymentRecord := testAuthorizedPayment(t, "payment-without-hold", "hold-missing")
+
+	if _, err := fixture.payments.CreatePayment(ctx, paymentRecord); err != nil {
+		t.Fatalf("expected payment create to succeed, got error: %v", err)
+	}
+
+	_, err := fixture.service.CapturePayment(ctx, payment.CapturePaymentInput{
+		PaymentID: paymentRecord.ID,
+	})
+	if !errors.Is(err, payment.ErrHoldNotFound) {
+		t.Fatalf("expected ErrHoldNotFound, got %v", err)
+	}
+}
+
+func TestServiceRejectsMissingPayerOnCapture(t *testing.T) {
+	ctx := context.Background()
+	fixture := newFixture(t)
+
+	paymentRecord := testAuthorizedPayment(t, "payment-1", "hold-1")
+	paymentRecord.PayerID = "missing"
+	hold := testHold(t, "hold-1", paymentRecord.ID)
+
+	if _, err := fixture.payments.CreatePayment(ctx, paymentRecord); err != nil {
+		t.Fatalf("expected payment create to succeed, got error: %v", err)
+	}
+
+	if _, err := fixture.payments.CreateHold(ctx, hold); err != nil {
+		t.Fatalf("expected hold create to succeed, got error: %v", err)
+	}
+
+	_, err := fixture.service.CapturePayment(ctx, payment.CapturePaymentInput{
+		PaymentID: paymentRecord.ID,
+	})
+	if !errors.Is(err, payer.ErrPayerNotFound) {
+		t.Fatalf("expected ErrPayerNotFound, got %v", err)
+	}
+}
+
+func TestServiceRejectsNonCapturablePayment(t *testing.T) {
+	ctx := context.Background()
+	fixture := newFixture(t)
+	authorized := authorizePayment(t, fixture)
+
+	captured, err := authorized.Payment.Capture(testNow().Add(time.Minute))
+	if err != nil {
+		t.Fatalf("expected capture to succeed, got error: %v", err)
+	}
+
+	if _, err := fixture.payments.UpdatePayment(ctx, captured); err != nil {
+		t.Fatalf("expected payment update to succeed, got error: %v", err)
+	}
+
+	_, err = fixture.service.CapturePayment(ctx, payment.CapturePaymentInput{
+		PaymentID: captured.ID,
+	})
+	if !errors.Is(err, payment.ErrPaymentNotCapturable) {
+		t.Fatalf("expected ErrPaymentNotCapturable, got %v", err)
+	}
+}
+
+func TestServiceRejectsExpiredAuthorizationOnCapture(t *testing.T) {
+	ctx := context.Background()
+	fixture := newFixture(t)
+	paymentRecord := testAuthorizedPayment(t, "payment-1", "hold-1")
+	paymentRecord.ExpiresAt = testNow().Add(-time.Minute)
+	hold := testHold(t, "hold-1", paymentRecord.ID)
+	payerRecord, err := fixture.payers.GetPayer(ctx, "payer-1")
+	if err != nil {
+		t.Fatalf("expected payer get to succeed, got error: %v", err)
+	}
+
+	reservedPayer, err := payerRecord.Reserve(paymentRecord.AmountMinor, paymentRecord.Currency, testNow())
+	if err != nil {
+		t.Fatalf("expected reserve to succeed, got error: %v", err)
+	}
+
+	if _, err := fixture.payers.UpdatePayer(ctx, reservedPayer); err != nil {
+		t.Fatalf("expected payer update to succeed, got error: %v", err)
+	}
+
+	if _, err := fixture.payments.CreatePayment(ctx, paymentRecord); err != nil {
+		t.Fatalf("expected payment create to succeed, got error: %v", err)
+	}
+
+	if _, err := fixture.payments.CreateHold(ctx, hold); err != nil {
+		t.Fatalf("expected hold create to succeed, got error: %v", err)
+	}
+
+	_, err = fixture.service.CapturePayment(ctx, payment.CapturePaymentInput{
+		PaymentID: paymentRecord.ID,
+	})
+	if !errors.Is(err, payment.ErrAuthorizationExpired) {
+		t.Fatalf("expected ErrAuthorizationExpired, got %v", err)
+	}
+}
+
 type fixture struct {
 	merchants *merchantmemory.Store
 	payers    *payermemory.Store
@@ -216,6 +387,62 @@ func newFixture(t *testing.T) fixture {
 		payments:  payments,
 		service:   payment.NewService(merchants, payers, payments),
 	}
+}
+
+func authorizePayment(t *testing.T, fixture fixture) payment.AuthorizePaymentResult {
+	t.Helper()
+
+	result, err := fixture.service.AuthorizePayment(context.Background(), payment.AuthorizePaymentInput{
+		MerchantID:  "merchant-1",
+		PayerID:     "payer-1",
+		AmountMinor: 4_000,
+		Currency:    "USD",
+	})
+	if err != nil {
+		t.Fatalf("expected authorization to succeed, got error: %v", err)
+	}
+
+	return result
+}
+
+func testAuthorizedPayment(t *testing.T, paymentID string, holdID string) payment.Payment {
+	t.Helper()
+
+	now := time.Now().UTC()
+
+	paymentRecord, err := payment.NewAuthorizedPayment(payment.NewAuthorizedPaymentInput{
+		ID:                  paymentID,
+		MerchantID:          "merchant-1",
+		PayerID:             "payer-1",
+		AmountMinor:         4_000,
+		Currency:            "USD",
+		AuthorizationHoldID: holdID,
+		Now:                 now,
+		ExpiresAt:           now.Add(15 * time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("failed to create authorized payment: %v", err)
+	}
+
+	return paymentRecord
+}
+
+func testHold(t *testing.T, holdID string, paymentID string) payment.Hold {
+	t.Helper()
+
+	hold, err := payment.NewHold(payment.NewHoldInput{
+		ID:          holdID,
+		PaymentID:   paymentID,
+		PayerID:     "payer-1",
+		AmountMinor: 4_000,
+		Currency:    "USD",
+		Now:         testNow(),
+	})
+	if err != nil {
+		t.Fatalf("failed to create hold: %v", err)
+	}
+
+	return hold
 }
 
 func testNow() time.Time {

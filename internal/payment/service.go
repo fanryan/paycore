@@ -15,6 +15,8 @@ var (
 	ErrMerchantCannotCreatePayments = errors.New("merchant cannot create payments")
 	ErrPayerCurrencyMismatch        = errors.New("payer currency does not match payment currency")
 	ErrInsufficientAvailableBalance = errors.New("payer has insufficient available balance")
+	ErrPaymentNotCapturable         = errors.New("payment is not capturable")
+	ErrAuthorizationExpired         = errors.New("authorization has expired")
 )
 
 type Service struct {
@@ -32,6 +34,16 @@ type AuthorizePaymentInput struct {
 }
 
 type AuthorizePaymentResult struct {
+	Payment Payment
+	Hold    Hold
+	Payer   payer.Payer
+}
+
+type CapturePaymentInput struct {
+	PaymentID string
+}
+
+type CapturePaymentResult struct {
 	Payment Payment
 	Hold    Hold
 	Payer   payer.Payer
@@ -70,6 +82,7 @@ func (s *Service) AuthorizePayment(ctx context.Context, input AuthorizePaymentIn
 	}
 
 	now := s.now().UTC()
+
 	paymentID, err := id.New("pay")
 	if err != nil {
 		return AuthorizePaymentResult{}, err
@@ -129,6 +142,69 @@ func (s *Service) AuthorizePayment(ctx context.Context, input AuthorizePaymentIn
 	return AuthorizePaymentResult{
 		Payment: createdPayment,
 		Hold:    createdHold,
+		Payer:   updatedPayer,
+	}, nil
+}
+
+func (s *Service) CapturePayment(ctx context.Context, input CapturePaymentInput) (CapturePaymentResult, error) {
+	paymentRecord, err := s.payments.GetPayment(ctx, input.PaymentID)
+	if err != nil {
+		return CapturePaymentResult{}, err
+	}
+
+	hold, err := s.payments.GetHoldByPaymentID(ctx, paymentRecord.ID)
+	if err != nil {
+		return CapturePaymentResult{}, err
+	}
+
+	payerRecord, err := s.payers.GetPayer(ctx, paymentRecord.PayerID)
+	if err != nil {
+		return CapturePaymentResult{}, err
+	}
+
+	now := s.now().UTC()
+
+	if paymentRecord.Status != StatusAuthorized {
+		return CapturePaymentResult{}, ErrPaymentNotCapturable
+	}
+
+	if now.After(paymentRecord.ExpiresAt) {
+		return CapturePaymentResult{}, ErrAuthorizationExpired
+	}
+
+	capturedPayment, err := paymentRecord.Capture(now)
+	if err != nil {
+		return CapturePaymentResult{}, err
+	}
+
+	capturedHold, err := hold.Capture(now)
+	if err != nil {
+		return CapturePaymentResult{}, err
+	}
+
+	updatedPayer, err := payerRecord.CaptureHeld(paymentRecord.AmountMinor, paymentRecord.Currency, now)
+	if err != nil {
+		return CapturePaymentResult{}, err
+	}
+
+	updatedPayer, err = s.payers.UpdatePayer(ctx, updatedPayer)
+	if err != nil {
+		return CapturePaymentResult{}, err
+	}
+
+	capturedHold, err = s.payments.UpdateHold(ctx, capturedHold)
+	if err != nil {
+		return CapturePaymentResult{}, err
+	}
+
+	capturedPayment, err = s.payments.UpdatePayment(ctx, capturedPayment)
+	if err != nil {
+		return CapturePaymentResult{}, err
+	}
+
+	return CapturePaymentResult{
+		Payment: capturedPayment,
+		Hold:    capturedHold,
 		Payer:   updatedPayer,
 	}, nil
 }
