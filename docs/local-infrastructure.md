@@ -13,6 +13,7 @@ The repository currently provides Docker Compose services for:
 - Persistent Docker volumes for PostgreSQL and Redis.
 - Health checks for PostgreSQL and Redis.
 - Local environment template in `.env.example`.
+- PostgreSQL merchant and payer schema migrations.
 
 Current services:
 
@@ -27,7 +28,7 @@ These are planned but not currently implemented:
 
 - Application runtime connection to PostgreSQL.
 - Application runtime connection to Redis.
-- PostgreSQL migrations.
+- PostgreSQL payment, idempotency, settlement, and outbox migrations.
 - PostgreSQL repository adapters.
 - Redis rate limiter.
 - Redis idempotency response cache.
@@ -137,6 +138,8 @@ go test ./...
 
 PostgreSQL and Redis integration tests are planned once the runtime adapters exist.
 
+Merchant and payer schema migrations are currently plain SQL and can be applied manually. A migration runner has not been selected yet.
+
 ## 7. File Guide
 
 `docker-compose.yml`
@@ -160,7 +163,9 @@ Documents how local services fit into the project roadmap.
 - [x] Add `.env.example`.
 - [x] Add database config loading.
 - [x] Add Redis config loading.
-- [ ] Add PostgreSQL migrations.
+- [x] Add PostgreSQL merchant and payer migrations.
+- [ ] Add PostgreSQL payment and idempotency migrations.
+- [ ] Add migration runner.
 - [ ] Add PostgreSQL repository adapters.
 - [ ] Add Redis rate limiter.
 - [ ] Add Redis idempotency response cache.
