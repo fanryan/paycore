@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/fanryan/paycore/internal/shared/httpjson"
+	"github.com/go-chi/chi/v5"
 )
 
 type RouterConfig struct {
@@ -30,29 +31,32 @@ func NewRouter(config RouterConfig) http.Handler {
 		config.Logger = slog.Default()
 	}
 
-	mux := http.NewServeMux()
+	router := chi.NewRouter()
 
-	mux.HandleFunc("GET /healthz", healthHandler)
-	mux.HandleFunc("GET /readyz", readyHandler)
-	mux.HandleFunc("GET /version", versionHandler(config))
+	router.Get("/healthz", healthHandler)
+	router.Get("/readyz", readyHandler)
+	router.Get("/version", versionHandler(config))
 
 	if config.MerchantHandler != nil {
-		mux.Handle("/merchants", config.MerchantHandler)
+		router.Handle("/merchants", config.MerchantHandler)
 	}
 
 	if config.PayerHandler != nil {
-		mux.Handle("/payers", config.PayerHandler)
+		router.Handle("/payers", config.PayerHandler)
 	}
 
 	if config.PaymentHandler != nil {
-		mux.Handle("/payments/authorize", config.PaymentHandler)
+		router.Route("/payments", func(r chi.Router) {
+			r.Post("/authorize", config.PaymentHandler.ServeHTTP)
+			r.Post("/{payment_id}/capture", config.PaymentHandler.ServeHTTP)
+		})
 	}
 
-	mux.HandleFunc("/", notFoundHandler)
+	router.NotFound(notFoundHandler)
 
 	return requestIDMiddleware(
 		loggingMiddleware(config.Logger)(
-			mux,
+			router,
 		),
 	)
 }

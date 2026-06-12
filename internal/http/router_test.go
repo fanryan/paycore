@@ -296,6 +296,89 @@ func TestPaymentAuthorizeRouteIsWired(t *testing.T) {
 	}
 }
 
+func TestPaymentCaptureRouteIsWired(t *testing.T) {
+	merchantRepository := merchantmemory.NewStore()
+	merchantService := merchant.NewMerchantService(merchantRepository)
+	merchantHandler := merchant.NewHandler(merchantService)
+
+	payerRepository := payermemory.NewStore()
+	payerService := payer.NewPayerService(payerRepository)
+	payerHandler := payer.NewHandler(payerService)
+
+	paymentRepository := paymentmemory.NewStore()
+	paymentService := payment.NewService(merchantRepository, payerRepository, paymentRepository)
+	paymentHandler := payment.NewHandler(paymentService)
+
+	router := NewRouter(RouterConfig{
+		ServiceName:     "paycore-api",
+		Version:         "test",
+		StartedAt:       time.Date(2026, 6, 6, 12, 0, 0, 0, time.UTC),
+		Logger:          slog.Default(),
+		MerchantHandler: merchantHandler,
+		PayerHandler:    payerHandler,
+		PaymentHandler:  paymentHandler,
+	})
+
+	createMerchantRequest := httptest.NewRequest(http.MethodPost, "/merchants", bytes.NewBufferString(`{
+		"id": "merchant-1",
+		"name": "Demo Merchant",
+		"settlement_currency": "USD"
+	}`))
+	createMerchantResponse := httptest.NewRecorder()
+	router.ServeHTTP(createMerchantResponse, createMerchantRequest)
+	if createMerchantResponse.Code != http.StatusCreated {
+		t.Fatalf("expected merchant create status %d, got %d", http.StatusCreated, createMerchantResponse.Code)
+	}
+
+	createPayerRequest := httptest.NewRequest(http.MethodPost, "/payers", bytes.NewBufferString(`{
+		"id": "payer-1",
+		"available_balance_minor": 10000,
+		"currency": "USD"
+	}`))
+	createPayerResponse := httptest.NewRecorder()
+	router.ServeHTTP(createPayerResponse, createPayerRequest)
+	if createPayerResponse.Code != http.StatusCreated {
+		t.Fatalf("expected payer create status %d, got %d", http.StatusCreated, createPayerResponse.Code)
+	}
+
+	authorizeRequest := httptest.NewRequest(http.MethodPost, "/payments/authorize", bytes.NewBufferString(`{
+		"merchant_id": "merchant-1",
+		"payer_id": "payer-1",
+		"amount": 4000,
+		"currency": "USD"
+	}`))
+	authorizeResponse := httptest.NewRecorder()
+	router.ServeHTTP(authorizeResponse, authorizeRequest)
+	if authorizeResponse.Code != http.StatusCreated {
+		t.Fatalf("expected authorize status %d, got %d", http.StatusCreated, authorizeResponse.Code)
+	}
+
+	var authorizeBody payment.AuthorizePaymentResponse
+	decodeJSON(t, authorizeResponse, &authorizeBody)
+
+	captureRequest := httptest.NewRequest(http.MethodPost, "/payments/"+authorizeBody.PaymentID+"/capture", nil)
+	captureResponse := httptest.NewRecorder()
+	router.ServeHTTP(captureResponse, captureRequest)
+
+	if captureResponse.Code != http.StatusOK {
+		t.Fatalf("expected capture status %d, got %d", http.StatusOK, captureResponse.Code)
+	}
+
+	assertHeaderExists(t, captureResponse, "X-Request-ID")
+	assertJSONContentType(t, captureResponse)
+
+	var captureBody payment.CapturePaymentResponse
+	decodeJSON(t, captureResponse, &captureBody)
+
+	if captureBody.PaymentID != authorizeBody.PaymentID {
+		t.Fatalf("expected payment id %q, got %q", authorizeBody.PaymentID, captureBody.PaymentID)
+	}
+
+	if captureBody.Status != "CAPTURED" {
+		t.Fatalf("expected status CAPTURED, got %q", captureBody.Status)
+	}
+}
+
 func newTestRouter() http.Handler {
 	return NewRouter(RouterConfig{
 		ServiceName: "paycore-api",
