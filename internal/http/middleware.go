@@ -11,7 +11,10 @@ import (
 
 type contextKey string
 
-const requestIDContextKey contextKey = "request_id"
+const (
+	requestIDContextKey contextKey = "request_id"
+	defaultMaxBodyBytes int64      = 1 << 20
+)
 
 type responseRecorder struct {
 	http.ResponseWriter
@@ -47,6 +50,41 @@ func requestIDMiddleware(next http.Handler) http.Handler {
 		ctx := context.WithValue(r.Context(), requestIDContextKey, requestID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func recoveryMiddleware(logger *slog.Logger) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					logger.Error(
+						"http request panic recovered",
+						"request_id", requestIDFromContext(r.Context()),
+						"method", r.Method,
+						"path", r.URL.Path,
+						"panic", recovered,
+					)
+
+					writeError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
+				}
+			}()
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+func bodyLimitMiddleware(maxBodyBytes int64) func(http.Handler) http.Handler {
+	if maxBodyBytes <= 0 {
+		maxBodyBytes = defaultMaxBodyBytes
+	}
+
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 func loggingMiddleware(logger *slog.Logger) func(http.Handler) http.Handler {

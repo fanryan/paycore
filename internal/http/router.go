@@ -55,8 +55,12 @@ func NewRouter(config RouterConfig) http.Handler {
 	router.NotFound(notFoundHandler)
 
 	return requestIDMiddleware(
-		loggingMiddleware(config.Logger)(
-			router,
+		recoveryMiddleware(config.Logger)(
+			loggingMiddleware(config.Logger)(
+				bodyLimitMiddleware(defaultMaxBodyBytes)(
+					router,
+				),
+			),
 		),
 	)
 }

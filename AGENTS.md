@@ -106,6 +106,8 @@ Build in this broad order unless the user asks otherwise:
 - Use explicit status constants for payment, hold, merchant, settlement, idempotency, and outbox states.
 - Return structured JSON errors with stable `error_code` values.
 - Preserve `request_id` through responses and logs.
+- Keep panic recovery and request body size limits in `internal/http/middleware.go`.
+- The current default HTTP request body limit is 1 MiB.
 - Use `context.Context` through API, service, repository, Redis, and Kafka boundaries.
 - Use `time.Time` in UTC for persisted and API timestamps.
 - Validate all external request payloads before mutation.

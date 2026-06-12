@@ -29,6 +29,8 @@ Current development stage:
 - Health, readiness, and version endpoints implemented
 - Request ID middleware implemented
 - Structured JSON request logging implemented
+- Panic recovery middleware implemented
+- Request body size limit middleware implemented
 - JSON error response shape introduced
 - Configuration loading implemented for environment, HTTP address, and server timeouts
 - Feature-first package layout introduced for merchant and payer modules
@@ -44,7 +46,7 @@ Current development stage:
 - Shared currency normalization and validation implemented
 - Shared random id helper implemented
 - Central HTTP router migrated to chi for path parameters and feature route composition
-- HTTP API foundation tests added
+- HTTP API foundation and middleware tests added
 - Configuration tests added
 - Merchant and payer unit tests added
 - Merchant and payer handler tests added

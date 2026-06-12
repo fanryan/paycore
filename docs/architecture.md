@@ -27,6 +27,8 @@ The current repository contains the first API foundation:
 - Chi-based central router for method routes and path parameters.
 - Request ID middleware using `X-Request-ID`.
 - Structured JSON request logging.
+- Panic recovery middleware with structured JSON errors.
+- Request body size limit middleware using a 1 MiB default.
 - Structured JSON error response shape.
 - Configuration loading from environment variables.
 - Shared currency normalization and validation.
@@ -120,7 +122,9 @@ Client
 internal/http.Router
   |
   +--> request ID middleware
+  +--> recovery middleware
   +--> logging middleware
+  +--> body size limit middleware
   |
   +--> GET /healthz
   +--> GET /readyz
