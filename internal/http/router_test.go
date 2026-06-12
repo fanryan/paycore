@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fanryan/paycore/internal/idempotency"
+	idempotencymemory "github.com/fanryan/paycore/internal/idempotency/adapters/memory"
 	"github.com/fanryan/paycore/internal/merchant"
 	merchantmemory "github.com/fanryan/paycore/internal/merchant/adapters/memory"
 	"github.com/fanryan/paycore/internal/payer"
@@ -376,6 +378,87 @@ func TestPaymentCaptureRouteIsWired(t *testing.T) {
 
 	if captureBody.Status != "CAPTURED" {
 		t.Fatalf("expected status CAPTURED, got %q", captureBody.Status)
+	}
+}
+
+func TestPaymentAuthorizeRouteUsesIdempotencyWhenConfigured(t *testing.T) {
+	merchantRepository := merchantmemory.NewStore()
+	merchantService := merchant.NewMerchantService(merchantRepository)
+	merchantHandler := merchant.NewHandler(merchantService)
+
+	payerRepository := payermemory.NewStore()
+	payerService := payer.NewPayerService(payerRepository)
+	payerHandler := payer.NewHandler(payerService)
+
+	paymentRepository := paymentmemory.NewStore()
+	paymentService := payment.NewService(merchantRepository, payerRepository, paymentRepository)
+	idempotencyRepository := idempotencymemory.NewStore()
+	idempotencyService := idempotency.NewService(idempotencyRepository, 24*time.Hour)
+	paymentHandler := payment.NewHandlerWithIdempotency(paymentService, idempotencyService)
+
+	router := NewRouter(RouterConfig{
+		ServiceName:     "paycore-api",
+		Version:         "test",
+		StartedAt:       time.Date(2026, 6, 6, 12, 0, 0, 0, time.UTC),
+		Logger:          slog.Default(),
+		MerchantHandler: merchantHandler,
+		PayerHandler:    payerHandler,
+		PaymentHandler:  paymentHandler,
+	})
+
+	createMerchantRequest := httptest.NewRequest(http.MethodPost, "/merchants", bytes.NewBufferString(`{
+		"id": "merchant-1",
+		"name": "Demo Merchant",
+		"settlement_currency": "USD"
+	}`))
+	createMerchantResponse := httptest.NewRecorder()
+	router.ServeHTTP(createMerchantResponse, createMerchantRequest)
+	if createMerchantResponse.Code != http.StatusCreated {
+		t.Fatalf("expected merchant create status %d, got %d", http.StatusCreated, createMerchantResponse.Code)
+	}
+
+	createPayerRequest := httptest.NewRequest(http.MethodPost, "/payers", bytes.NewBufferString(`{
+		"id": "payer-1",
+		"available_balance_minor": 10000,
+		"currency": "USD"
+	}`))
+	createPayerResponse := httptest.NewRecorder()
+	router.ServeHTTP(createPayerResponse, createPayerRequest)
+	if createPayerResponse.Code != http.StatusCreated {
+		t.Fatalf("expected payer create status %d, got %d", http.StatusCreated, createPayerResponse.Code)
+	}
+
+	authorizeRequest := httptest.NewRequest(http.MethodPost, "/payments/authorize", bytes.NewBufferString(`{
+		"merchant_id": "merchant-1",
+		"payer_id": "payer-1",
+		"amount": 4000,
+		"currency": "USD"
+	}`))
+	authorizeResponse := httptest.NewRecorder()
+	router.ServeHTTP(authorizeResponse, authorizeRequest)
+
+	if authorizeResponse.Code != http.StatusBadRequest {
+		t.Fatalf("expected missing idempotency key status %d, got %d", http.StatusBadRequest, authorizeResponse.Code)
+	}
+
+	var errorBody map[string]string
+	decodeJSON(t, authorizeResponse, &errorBody)
+	if errorBody["error_code"] != "IDEMPOTENCY_KEY_REQUIRED" {
+		t.Fatalf("expected IDEMPOTENCY_KEY_REQUIRED, got %q", errorBody["error_code"])
+	}
+
+	idempotentRequest := httptest.NewRequest(http.MethodPost, "/payments/authorize", bytes.NewBufferString(`{
+		"merchant_id": "merchant-1",
+		"payer_id": "payer-1",
+		"amount": 4000,
+		"currency": "USD"
+	}`))
+	idempotentRequest.Header.Set("Idempotency-Key", "idem-key-1")
+	idempotentResponse := httptest.NewRecorder()
+	router.ServeHTTP(idempotentResponse, idempotentRequest)
+
+	if idempotentResponse.Code != http.StatusCreated {
+		t.Fatalf("expected idempotent authorize status %d, got %d", http.StatusCreated, idempotentResponse.Code)
 	}
 }
 

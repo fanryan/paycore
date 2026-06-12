@@ -10,6 +10,8 @@ import (
 	"time"
 
 	httpapi "github.com/fanryan/paycore/internal/http"
+	"github.com/fanryan/paycore/internal/idempotency"
+	idempotencymemory "github.com/fanryan/paycore/internal/idempotency/adapters/memory"
 	"github.com/fanryan/paycore/internal/merchant"
 	merchantmemory "github.com/fanryan/paycore/internal/merchant/adapters/memory"
 	"github.com/fanryan/paycore/internal/payer"
@@ -38,7 +40,11 @@ func main() {
 
 	paymentRepository := paymentmemory.NewStore()
 	paymentService := payment.NewService(merchantRepository, payerRepository, paymentRepository)
-	paymentHandler := payment.NewHandler(paymentService)
+
+	idempotencyRepository := idempotencymemory.NewStore()
+	idempotencyService := idempotency.NewService(idempotencyRepository, 24*time.Hour)
+
+	paymentHandler := payment.NewHandlerWithIdempotency(paymentService, idempotencyService)
 
 	server := &http.Server{
 		Addr: cfg.HTTPAddr,

@@ -1,10 +1,13 @@
 package payment
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 
+	"github.com/fanryan/paycore/internal/idempotency"
 	"github.com/fanryan/paycore/internal/merchant"
 	"github.com/fanryan/paycore/internal/payer"
 	"github.com/fanryan/paycore/internal/shared/httpjson"
@@ -12,7 +15,8 @@ import (
 )
 
 type Handler struct {
-	service *Service
+	service     *Service
+	idempotency *idempotency.Service
 }
 
 type AuthorizePaymentRequest struct {
@@ -48,6 +52,13 @@ func NewHandler(service *Service) *Handler {
 	}
 }
 
+func NewHandlerWithIdempotency(service *Service, idempotencyService *idempotency.Service) *Handler {
+	return &Handler{
+		service:     service,
+		idempotency: idempotencyService,
+	}
+}
+
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.URL.Path == "/payments/authorize":
@@ -73,8 +84,29 @@ func (h *Handler) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	recorder := newResponseRecorder(w)
+	w = recorder
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		httpjson.Write(w, http.StatusBadRequest, map[string]string{
+			"error_code": "INVALID_REQUEST_BODY",
+			"message":    "Request body could not be read",
+		})
+		return
+	}
+
+	if h.idempotency != nil {
+		result, handled := h.handleIdempotencyStart(w, r, body)
+		if handled {
+			return
+		}
+
+		defer h.completeIdempotency(r, result.Record.Key, w)
+	}
+
 	var request AuthorizePaymentRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&request); err != nil {
 		httpjson.Write(w, http.StatusBadRequest, map[string]string{
 			"error_code": "INVALID_JSON",
 			"message":    "Request body must be valid JSON",
@@ -125,6 +157,49 @@ func (h *Handler) HandleCapture(w http.ResponseWriter, r *http.Request) {
 	}
 
 	httpjson.Write(w, http.StatusOK, capturePaymentResponse(result))
+}
+
+func (h *Handler) handleIdempotencyStart(w http.ResponseWriter, r *http.Request, body []byte) (idempotency.StartRequestResult, bool) {
+	key := r.Header.Get("Idempotency-Key")
+	if key == "" {
+		httpjson.Write(w, http.StatusBadRequest, map[string]string{
+			"error_code": "IDEMPOTENCY_KEY_REQUIRED",
+			"message":    "Idempotency-Key header is required",
+		})
+		return idempotency.StartRequestResult{}, true
+	}
+
+	result, err := h.idempotency.StartRequest(r.Context(), idempotency.StartRequestInput{
+		Key:         key,
+		RequestHash: idempotency.HashRequestBody(body),
+	})
+	if err != nil {
+		status, response := idempotencyErrorResponse(err)
+		httpjson.Write(w, status, response)
+		return idempotency.StartRequestResult{}, true
+	}
+
+	if result.Replay {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(result.ResponseCode)
+		_, _ = w.Write(result.ResponseBody)
+		return result, true
+	}
+
+	return result, false
+}
+
+func (h *Handler) completeIdempotency(r *http.Request, key string, w http.ResponseWriter) {
+	recorder, ok := w.(*responseRecorder)
+	if !ok {
+		return
+	}
+
+	_, _ = h.idempotency.CompleteRequest(r.Context(), idempotency.CompleteRequestInput{
+		Key:          key,
+		ResponseCode: recorder.statusCode,
+		ResponseBody: recorder.body.Bytes(),
+	})
 }
 
 func authorizationErrorResponse(err error) (int, map[string]string) {
@@ -192,6 +267,31 @@ func captureErrorResponse(err error) (int, map[string]string) {
 	default:
 		return http.StatusBadRequest, map[string]string{
 			"error_code": "INVALID_PAYMENT_CAPTURE",
+			"message":    err.Error(),
+		}
+	}
+}
+
+func idempotencyErrorResponse(err error) (int, map[string]string) {
+	switch {
+	case errors.Is(err, idempotency.ErrRequestHashMismatch):
+		return http.StatusConflict, map[string]string{
+			"error_code": "IDEMPOTENCY_KEY_CONFLICT",
+			"message":    "Idempotency-Key was already used for a different request",
+		}
+	case errors.Is(err, idempotency.ErrExpiredIdempotencyKey):
+		return http.StatusConflict, map[string]string{
+			"error_code": "IDEMPOTENCY_KEY_EXPIRED",
+			"message":    "Idempotency-Key has expired",
+		}
+	case errors.Is(err, idempotency.ErrRequestInProgress):
+		return http.StatusConflict, map[string]string{
+			"error_code": "IDEMPOTENCY_REQUEST_IN_PROGRESS",
+			"message":    "Request with this Idempotency-Key is already in progress",
+		}
+	default:
+		return http.StatusBadRequest, map[string]string{
+			"error_code": "INVALID_IDEMPOTENCY_KEY",
 			"message":    err.Error(),
 		}
 	}

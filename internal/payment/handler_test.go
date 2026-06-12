@@ -7,7 +7,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
+	"github.com/fanryan/paycore/internal/idempotency"
+	idempotencymemory "github.com/fanryan/paycore/internal/idempotency/adapters/memory"
 	"github.com/fanryan/paycore/internal/merchant"
 	merchantmemory "github.com/fanryan/paycore/internal/merchant/adapters/memory"
 	"github.com/fanryan/paycore/internal/payer"
@@ -225,6 +228,115 @@ func TestHandlerRejectsMissingPaymentOnCapture(t *testing.T) {
 	}
 }
 
+func TestHandlerWithIdempotencyRejectsMissingKey(t *testing.T) {
+	fixture := newIdempotentHandlerFixture(t)
+
+	request := httptest.NewRequest(http.MethodPost, "/payments/authorize", bytes.NewBufferString(`{
+		"merchant_id": "merchant-1",
+		"payer_id": "payer-1",
+		"amount": 4000,
+		"currency": "usd"
+	}`))
+	response := httptest.NewRecorder()
+
+	fixture.handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, response.Code)
+	}
+
+	var body map[string]string
+	decodeJSON(t, response, &body)
+
+	if body["error_code"] != "IDEMPOTENCY_KEY_REQUIRED" {
+		t.Fatalf("expected IDEMPOTENCY_KEY_REQUIRED, got %q", body["error_code"])
+	}
+}
+
+func TestHandlerWithIdempotencyReplaysCompletedAuthorization(t *testing.T) {
+	fixture := newIdempotentHandlerFixture(t)
+	requestBody := `{
+		"merchant_id": "merchant-1",
+		"payer_id": "payer-1",
+		"amount": 4000,
+		"currency": "usd"
+	}`
+
+	firstRequest := httptest.NewRequest(http.MethodPost, "/payments/authorize", bytes.NewBufferString(requestBody))
+	firstRequest.Header.Set("Idempotency-Key", "idem-key-1")
+	firstResponse := httptest.NewRecorder()
+
+	fixture.handler.ServeHTTP(firstResponse, firstRequest)
+
+	if firstResponse.Code != http.StatusCreated {
+		t.Fatalf("expected first status %d, got %d", http.StatusCreated, firstResponse.Code)
+	}
+
+	var firstBody payment.AuthorizePaymentResponse
+	decodeJSON(t, firstResponse, &firstBody)
+
+	secondRequest := httptest.NewRequest(http.MethodPost, "/payments/authorize", bytes.NewBufferString(requestBody))
+	secondRequest.Header.Set("Idempotency-Key", "idem-key-1")
+	secondResponse := httptest.NewRecorder()
+
+	fixture.handler.ServeHTTP(secondResponse, secondRequest)
+
+	if secondResponse.Code != http.StatusCreated {
+		t.Fatalf("expected replay status %d, got %d", http.StatusCreated, secondResponse.Code)
+	}
+
+	var secondBody payment.AuthorizePaymentResponse
+	decodeJSON(t, secondResponse, &secondBody)
+
+	if secondBody.PaymentID != firstBody.PaymentID {
+		t.Fatalf("expected replay payment id %q, got %q", firstBody.PaymentID, secondBody.PaymentID)
+	}
+
+	if secondBody.HoldID != firstBody.HoldID {
+		t.Fatalf("expected replay hold id %q, got %q", firstBody.HoldID, secondBody.HoldID)
+	}
+}
+
+func TestHandlerWithIdempotencyRejectsKeyConflict(t *testing.T) {
+	fixture := newIdempotentHandlerFixture(t)
+
+	firstRequest := httptest.NewRequest(http.MethodPost, "/payments/authorize", bytes.NewBufferString(`{
+		"merchant_id": "merchant-1",
+		"payer_id": "payer-1",
+		"amount": 4000,
+		"currency": "usd"
+	}`))
+	firstRequest.Header.Set("Idempotency-Key", "idem-key-1")
+	firstResponse := httptest.NewRecorder()
+
+	fixture.handler.ServeHTTP(firstResponse, firstRequest)
+	if firstResponse.Code != http.StatusCreated {
+		t.Fatalf("expected first status %d, got %d", http.StatusCreated, firstResponse.Code)
+	}
+
+	secondRequest := httptest.NewRequest(http.MethodPost, "/payments/authorize", bytes.NewBufferString(`{
+		"merchant_id": "merchant-1",
+		"payer_id": "payer-1",
+		"amount": 5000,
+		"currency": "usd"
+	}`))
+	secondRequest.Header.Set("Idempotency-Key", "idem-key-1")
+	secondResponse := httptest.NewRecorder()
+
+	fixture.handler.ServeHTTP(secondResponse, secondRequest)
+
+	if secondResponse.Code != http.StatusConflict {
+		t.Fatalf("expected conflict status %d, got %d", http.StatusConflict, secondResponse.Code)
+	}
+
+	var body map[string]string
+	decodeJSON(t, secondResponse, &body)
+
+	if body["error_code"] != "IDEMPOTENCY_KEY_CONFLICT" {
+		t.Fatalf("expected IDEMPOTENCY_KEY_CONFLICT, got %q", body["error_code"])
+	}
+}
+
 type handlerFixture struct {
 	handler *payment.Handler
 	router  http.Handler
@@ -257,6 +369,44 @@ func newHandlerFixture(t *testing.T) handlerFixture {
 
 	service := payment.NewService(merchantRepository, payerRepository, paymentRepository)
 	handler := payment.NewHandler(service)
+	router := chi.NewRouter()
+	router.Post("/payments/{payment_id}/capture", handler.HandleCapture)
+
+	return handlerFixture{
+		handler: handler,
+		router:  router,
+	}
+}
+
+func newIdempotentHandlerFixture(t *testing.T) handlerFixture {
+	t.Helper()
+
+	merchantRepository := merchantmemory.NewStore()
+	payerRepository := payermemory.NewStore()
+	paymentRepository := paymentmemory.NewStore()
+	idempotencyRepository := idempotencymemory.NewStore()
+
+	merchantRecord, err := merchant.NewMerchant("merchant-1", "Demo Merchant", "USD", testNow())
+	if err != nil {
+		t.Fatalf("failed to create merchant: %v", err)
+	}
+
+	if _, err := merchantRepository.CreateMerchant(context.Background(), merchantRecord); err != nil {
+		t.Fatalf("failed to save merchant: %v", err)
+	}
+
+	payerRecord, err := payer.NewPayer("payer-1", 10_000, "USD", testNow())
+	if err != nil {
+		t.Fatalf("failed to create payer: %v", err)
+	}
+
+	if _, err := payerRepository.CreatePayer(context.Background(), payerRecord); err != nil {
+		t.Fatalf("failed to save payer: %v", err)
+	}
+
+	service := payment.NewService(merchantRepository, payerRepository, paymentRepository)
+	idempotencyService := idempotency.NewService(idempotencyRepository, 24*time.Hour)
+	handler := payment.NewHandlerWithIdempotency(service, idempotencyService)
 	router := chi.NewRouter()
 	router.Post("/payments/{payment_id}/capture", handler.HandleCapture)
 
