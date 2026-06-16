@@ -36,10 +36,11 @@ Current development stage:
 - Feature-first package layout introduced for merchant and payer modules
 - Merchant entity, service, repository interface, and in-memory adapter implemented
 - Payer entity, service, repository interface, and in-memory adapter implemented
-- PostgreSQL repository adapters implemented for merchant, payer, payment, holds, and idempotency records
-- PostgreSQL merchant, payer, payment, hold, and idempotency schema migrations added
+- PostgreSQL repository adapters implemented for merchant, payer, payment, holds, idempotency records, and outbox events
+- PostgreSQL merchant, payer, payment, hold, idempotency, and outbox schema migrations added
 - Runtime repository backend switch implemented with `PAYCORE_REPOSITORY_BACKEND=memory|postgres`
 - Shared transactor added for Postgres transaction propagation through `context.Context`
+- Transactional outbox foundation implemented for `payment.authorized` and `payment.captured` events
 - Merchant HTTP create and list endpoints implemented
 - Payer HTTP create and list endpoints implemented
 - Payer balance reservation, release, and held-capture behavior implemented
@@ -57,7 +58,7 @@ Current development stage:
 - Merchant and payer unit tests added
 - Merchant and payer handler tests added
 - Payment service, handler, repository, entity, hold, idempotency, and router tests added
-- Postgres-backed HTTP smoke test added for merchant creation, payer creation, authorization, capture, and persisted payment reload
+- Postgres-backed HTTP smoke test added for merchant creation, payer creation, authorization, capture, persisted payment reload, and outbox event creation
 
 Implemented endpoints:
 
@@ -73,9 +74,9 @@ POST /payments/authorize
 POST /payments/{payment_id}/capture
 ```
 
-Runtime wiring to PostgreSQL repositories is available through `PAYCORE_REPOSITORY_BACKEND=postgres`. Memory repositories remain the default. Redis, Kafka, Prometheus, settlement processing, and outbox publishing have not been implemented yet.
+Runtime wiring to PostgreSQL repositories is available through `PAYCORE_REPOSITORY_BACKEND=postgres`. Memory repositories remain the default. Redis, Kafka, Prometheus, settlement processing, and the outbox publisher worker have not been implemented yet.
 
-Payment authorization and capture enforce `Idempotency-Key`. In memory mode, idempotency records are process-local. In Postgres mode, merchant, payer, payment, hold, and idempotency records use PostgreSQL repositories. Payment authorization and capture business mutations run through a service-level transaction boundary in Postgres mode.
+Payment authorization and capture enforce `Idempotency-Key`. In memory mode, idempotency records are process-local. In Postgres mode, merchant, payer, payment, hold, idempotency, and outbox records use PostgreSQL repositories. Payment authorization and capture business mutations plus outbox event creation run through a service-level transaction boundary in Postgres mode.
 
 ## Run Locally
 
@@ -221,6 +222,16 @@ paycore/
         postgres/
           repository.go
           repository_test.go
+    outbox/
+      event.go
+      event_test.go
+      repository.go
+      adapters/
+        memory/
+          repository.go
+        postgres/
+          repository.go
+          repository_test.go
     payer/
       entity.go
       handler.go
@@ -270,13 +281,16 @@ paycore/
     idempotency.md
     local-infrastructure.md
     merchant.md
+    outbox.md
     payer.md
     payment.md
+    postgresql-migrations.md
   migrations/
     000001_create_merchants.sql
     000002_create_payers.sql
     000003_create_payments.sql
     000004_create_idempotency_records.sql
+    000005_create_outbox_events.sql
   go.mod
   docker-compose.yml
   .env.example

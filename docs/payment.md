@@ -74,7 +74,7 @@ These are planned but not currently implemented:
 - `GET /payments/{payment_id}`.
 - Redis-backed rate limiting.
 - Redis-backed idempotency response cache.
-- Single PostgreSQL transaction that also includes idempotency completion and future outbox writes.
+- Single PostgreSQL transaction that also includes idempotency completion.
 - Transactional outbox event creation.
 - Kafka event publishing.
 - Authorization expiry worker.
@@ -455,7 +455,7 @@ In memory mode, `db.NoopTransactor` runs the service callback without durable tr
 
 In Postgres mode, `db.PostgresTransactor` starts one transaction, injects it into `context.Context`, and the Postgres payer/payment repositories execute against that transaction when present. This means payer balance mutation, payment mutation, and hold mutation commit or roll back together for authorization and capture.
 
-HTTP idempotency start/completion currently happens in the handler outside the payment service transaction. A later milestone should move durable idempotency completion and outbox event creation into the same transaction boundary as the business state.
+HTTP idempotency start/completion currently happens in the handler outside the payment service transaction. Outbox event creation now happens inside the payment service transaction with payer, payment, and hold mutations. A later milestone should move durable idempotency completion into the same transaction boundary.
 
 ### PostgreSQL Adapter
 
@@ -471,6 +471,8 @@ Current durable records:
 - payment holds
 
 Idempotency records are durable in Postgres mode through `internal/idempotency/adapters/postgres/repository.go`, but are not yet completed atomically with payment business state.
+
+Outbox events are durable in Postgres mode through `internal/outbox/adapters/postgres/repository.go`. Authorization creates `payment.authorized`; capture creates `payment.captured`.
 
 ## 8. Tests
 
@@ -513,6 +515,8 @@ Current tests cover:
 - Postgres transactor commit behavior
 - Postgres transactor rollback behavior
 - nested Postgres transactor reuse behavior
+- payment authorization outbox event creation
+- payment capture outbox event creation
 
 Run:
 
@@ -564,6 +568,14 @@ Defines the cross-feature `Transactor` interface, context transaction lookup, an
 
 Starts, commits, rolls back, and propagates PostgreSQL transactions through `context.Context`.
 
+`internal/outbox/event.go`
+
+Defines durable outbox event shape and pending event construction.
+
+`internal/outbox/adapters/postgres/repository.go`
+
+Persists outbox events and participates in context-propagated PostgreSQL transactions.
+
 ## Checklist
 
 - [x] Add payment entity.
@@ -584,4 +596,5 @@ Starts, commits, rolls back, and propagates PostgreSQL transactions through `con
 - [x] Add transaction boundary around authorization and capture business mutations.
 - [x] Add durable authorization/capture transaction for payer, payment, and hold writes.
 - [ ] Move durable idempotency completion into the payment transaction boundary.
-- [ ] Add transactional outbox event for `payment.authorized`.
+- [x] Add transactional outbox event for `payment.authorized`.
+- [x] Add transactional outbox event for `payment.captured`.

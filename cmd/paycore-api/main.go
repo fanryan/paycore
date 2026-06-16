@@ -17,6 +17,9 @@ import (
 	"github.com/fanryan/paycore/internal/merchant"
 	merchantmemory "github.com/fanryan/paycore/internal/merchant/adapters/memory"
 	merchantpostgres "github.com/fanryan/paycore/internal/merchant/adapters/postgres"
+	"github.com/fanryan/paycore/internal/outbox"
+	outboxmemory "github.com/fanryan/paycore/internal/outbox/adapters/memory"
+	outboxpostgres "github.com/fanryan/paycore/internal/outbox/adapters/postgres"
 	"github.com/fanryan/paycore/internal/payer"
 	payermemory "github.com/fanryan/paycore/internal/payer/adapters/memory"
 	payerpostgres "github.com/fanryan/paycore/internal/payer/adapters/postgres"
@@ -38,6 +41,7 @@ type repositories struct {
 	payers      payer.PayerRepository
 	payments    payment.Repository
 	idempotency idempotency.Repository
+	outbox      outbox.Repository
 	transactor  db.Transactor
 	close       func()
 }
@@ -59,11 +63,12 @@ func main() {
 	payerService := payer.NewPayerService(repositories.payers)
 	payerHandler := payer.NewHandler(payerService)
 
-	paymentService := payment.NewServiceWithTransactor(
+	paymentService := payment.NewServiceWithTransactorAndOutbox(
 		repositories.merchants,
 		repositories.payers,
 		repositories.payments,
 		repositories.transactor,
+		repositories.outbox,
 	)
 	idempotencyService := idempotency.NewService(repositories.idempotency, 24*time.Hour)
 	paymentHandler := payment.NewHandlerWithIdempotency(paymentService, idempotencyService)
@@ -133,6 +138,7 @@ func newMemoryRepositories() repositories {
 		payers:      payermemory.NewStore(),
 		payments:    paymentmemory.NewStore(),
 		idempotency: idempotencymemory.NewStore(),
+		outbox:      outboxmemory.NewStore(),
 		transactor:  db.NoopTransactor{},
 		close:       func() {},
 	}
@@ -158,6 +164,7 @@ func newPostgresRepositories(ctx context.Context, databaseURL string) (repositor
 		payers:      payerpostgres.NewStore(pool),
 		payments:    paymentpostgres.NewStore(pool),
 		idempotency: idempotencypostgres.NewStore(pool),
+		outbox:      outboxpostgres.NewStore(pool),
 		transactor:  db.NewPostgresTransactor(pool),
 		close:       pool.Close,
 	}, nil

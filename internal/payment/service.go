@@ -6,10 +6,17 @@ import (
 	"time"
 
 	"github.com/fanryan/paycore/internal/merchant"
+	"github.com/fanryan/paycore/internal/outbox"
 	"github.com/fanryan/paycore/internal/payer"
 	currencycode "github.com/fanryan/paycore/internal/shared/currency"
 	"github.com/fanryan/paycore/internal/shared/db"
 	"github.com/fanryan/paycore/internal/shared/id"
+)
+
+const (
+	aggregateTypePayment       = "payment"
+	eventTypePaymentAuthorized = "payment.authorized"
+	eventTypePaymentCaptured   = "payment.captured"
 )
 
 var (
@@ -24,6 +31,7 @@ type Service struct {
 	merchants  merchant.MerchantRepository
 	payers     payer.PayerRepository
 	payments   Repository
+	outbox     outbox.Repository
 	transactor db.Transactor
 	now        func() time.Time
 }
@@ -51,8 +59,35 @@ type CapturePaymentResult struct {
 	Payer   payer.Payer
 }
 
+type paymentAuthorizedPayload struct {
+	PaymentID    string    `json:"payment_id"`
+	MerchantID   string    `json:"merchant_id"`
+	PayerID      string    `json:"payer_id"`
+	AmountMinor  int64     `json:"amount_minor"`
+	Currency     string    `json:"currency"`
+	HoldID       string    `json:"hold_id"`
+	AuthorizedAt time.Time `json:"authorized_at"`
+	ExpiresAt    time.Time `json:"expires_at"`
+}
+
+type paymentCapturedPayload struct {
+	PaymentID      string    `json:"payment_id"`
+	MerchantID     string    `json:"merchant_id"`
+	PayerID        string    `json:"payer_id"`
+	CapturedAmount int64     `json:"captured_amount"`
+	Currency       string    `json:"currency"`
+	HoldID         string    `json:"hold_id"`
+	CapturedAt     time.Time `json:"captured_at"`
+}
+
 func NewService(merchants merchant.MerchantRepository, payers payer.PayerRepository, payments Repository) *Service {
-	return NewServiceWithTransactor(merchants, payers, payments, db.NoopTransactor{})
+	return NewServiceWithTransactorAndOutbox(
+		merchants,
+		payers,
+		payments,
+		db.NoopTransactor{},
+		outbox.NoopRepository{},
+	)
 }
 
 func NewServiceWithTransactor(
@@ -61,14 +96,35 @@ func NewServiceWithTransactor(
 	payments Repository,
 	transactor db.Transactor,
 ) *Service {
+	return NewServiceWithTransactorAndOutbox(
+		merchants,
+		payers,
+		payments,
+		transactor,
+		outbox.NoopRepository{},
+	)
+}
+
+func NewServiceWithTransactorAndOutbox(
+	merchants merchant.MerchantRepository,
+	payers payer.PayerRepository,
+	payments Repository,
+	transactor db.Transactor,
+	outboxRepository outbox.Repository,
+) *Service {
 	if transactor == nil {
 		transactor = db.NoopTransactor{}
+	}
+
+	if outboxRepository == nil {
+		outboxRepository = outbox.NoopRepository{}
 	}
 
 	return &Service{
 		merchants:  merchants,
 		payers:     payers,
 		payments:   payments,
+		outbox:     outboxRepository,
 		transactor: transactor,
 		now:        time.Now,
 	}
@@ -158,6 +214,30 @@ func (s *Service) AuthorizePayment(ctx context.Context, input AuthorizePaymentIn
 			return err
 		}
 
+		event, err := outbox.NewEvent(outbox.NewEventInput{
+			AggregateType: aggregateTypePayment,
+			AggregateID:   createdPayment.ID,
+			EventType:     eventTypePaymentAuthorized,
+			Payload: paymentAuthorizedPayload{
+				PaymentID:    createdPayment.ID,
+				MerchantID:   createdPayment.MerchantID,
+				PayerID:      createdPayment.PayerID,
+				AmountMinor:  createdPayment.AmountMinor,
+				Currency:     createdPayment.Currency,
+				HoldID:       createdHold.ID,
+				AuthorizedAt: createdPayment.AuthorizedAt,
+				ExpiresAt:    createdPayment.ExpiresAt,
+			},
+			Now: now,
+		})
+		if err != nil {
+			return err
+		}
+
+		if _, err := s.outbox.CreateEvent(ctx, event); err != nil {
+			return err
+		}
+
 		result = AuthorizePaymentResult{
 			Payment: createdPayment,
 			Hold:    createdHold,
@@ -229,6 +309,29 @@ func (s *Service) CapturePayment(ctx context.Context, input CapturePaymentInput)
 
 		capturedPayment, err = s.payments.UpdatePayment(ctx, capturedPayment)
 		if err != nil {
+			return err
+		}
+
+		event, err := outbox.NewEvent(outbox.NewEventInput{
+			AggregateType: aggregateTypePayment,
+			AggregateID:   capturedPayment.ID,
+			EventType:     eventTypePaymentCaptured,
+			Payload: paymentCapturedPayload{
+				PaymentID:      capturedPayment.ID,
+				MerchantID:     capturedPayment.MerchantID,
+				PayerID:        capturedPayment.PayerID,
+				CapturedAmount: capturedPayment.AmountMinor,
+				Currency:       capturedPayment.Currency,
+				HoldID:         capturedHold.ID,
+				CapturedAt:     now,
+			},
+			Now: now,
+		})
+		if err != nil {
+			return err
+		}
+
+		if _, err := s.outbox.CreateEvent(ctx, event); err != nil {
 			return err
 		}
 

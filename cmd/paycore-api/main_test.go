@@ -105,12 +105,21 @@ func TestPostgresBackendSupportsHTTPPaymentLifecycle(t *testing.T) {
 	if storedPayment.Status != payment.StatusCaptured {
 		t.Fatalf("expected persisted captured payment, got %q", storedPayment.Status)
 	}
+
+	assertOutboxEvent(t, databaseURL, authorizeResponse.PaymentID, "payment.authorized")
+	assertOutboxEvent(t, databaseURL, authorizeResponse.PaymentID, "payment.captured")
 }
 
 func newTestRouter(repositories repositories) http.Handler {
 	merchantService := merchant.NewMerchantService(repositories.merchants)
 	payerService := payer.NewPayerService(repositories.payers)
-	paymentService := payment.NewService(repositories.merchants, repositories.payers, repositories.payments)
+	paymentService := payment.NewServiceWithTransactorAndOutbox(
+		repositories.merchants,
+		repositories.payers,
+		repositories.payments,
+		repositories.transactor,
+		repositories.outbox,
+	)
 	idempotencyService := idempotency.NewService(repositories.idempotency, 24*time.Hour)
 
 	return httpapi.NewRouter(httpapi.RouterConfig{
@@ -162,6 +171,7 @@ func cleanupPostgresSmokeRows(t *testing.T, databaseURL string, prefix string) {
 
 	likePrefix := prefix + "%"
 	statements := []string{
+		"DELETE FROM outbox_events WHERE aggregate_id IN (SELECT id FROM payments WHERE merchant_id LIKE $1 OR payer_id LIKE $1)",
 		"DELETE FROM payment_holds WHERE id LIKE $1 OR payment_id LIKE $1",
 		"DELETE FROM payments WHERE id LIKE $1",
 		"DELETE FROM idempotency_records WHERE key LIKE $1",
@@ -173,5 +183,34 @@ func cleanupPostgresSmokeRows(t *testing.T, databaseURL string, prefix string) {
 		if _, err := pool.Exec(ctx, statement, likePrefix); err != nil {
 			t.Fatalf("cleanup %q: %v", strings.TrimSpace(statement), err)
 		}
+	}
+}
+
+func assertOutboxEvent(t *testing.T, databaseURL string, paymentID string, eventType string) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	pool, err := pgxpool.New(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("create outbox assertion pool: %v", err)
+	}
+	defer pool.Close()
+
+	var count int
+	if err := pool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM outbox_events
+		WHERE aggregate_type = 'payment'
+		AND aggregate_id = $1
+		AND event_type = $2
+		AND status = 'PENDING'
+	`, paymentID, eventType).Scan(&count); err != nil {
+		t.Fatalf("query outbox event %q: %v", eventType, err)
+	}
+
+	if count != 1 {
+		t.Fatalf("expected one %q outbox event for payment %q, got %d", eventType, paymentID, count)
 	}
 }

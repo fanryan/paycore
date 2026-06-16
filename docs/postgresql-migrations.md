@@ -12,6 +12,7 @@ The repository currently includes plain SQL migrations for:
 - Payer table creation in `migrations/000002_create_payers.sql`.
 - Payment and hold table creation in `migrations/000003_create_payments.sql`.
 - Idempotency record table creation in `migrations/000004_create_idempotency_records.sql`.
+- Outbox event table creation in `migrations/000005_create_outbox_events.sql`.
 - Migration runner command in `cmd/paycore-migrate`.
 
 The migrations define:
@@ -24,6 +25,7 @@ The migrations define:
 - Payment status constraints.
 - Payment hold status constraints.
 - Idempotency status constraints.
+- Outbox event status constraints.
 - Timestamp columns for creation and update time.
 
 ### Not Implemented Yet
@@ -32,8 +34,8 @@ These are planned but not currently implemented:
 
 - Automatic migration execution in app startup.
 - Settlement migrations.
-- Outbox migrations.
-- Single transaction that also includes idempotency completion and future outbox writes.
+- Single transaction that also includes idempotency completion.
+- Outbox publisher claiming and retry behavior.
 - Redis-backed idempotency response cache.
 
 ## 2. Migration Files
@@ -46,6 +48,7 @@ migrations/
   000002_create_payers.sql
   000003_create_payments.sql
   000004_create_idempotency_records.sql
+  000005_create_outbox_events.sql
 ```
 
 The files are plain SQL and are applied by the local `paycore-migrate` command.
@@ -157,7 +160,36 @@ Current constraints:
 
 The response body is stored as `BYTEA` so the repository can replay the exact HTTP response payload.
 
-## 7. Migration Runner
+## 7. Outbox Schema
+
+The `outbox_events` table stores:
+
+- `id`
+- `aggregate_type`
+- `aggregate_id`
+- `event_type`
+- `payload`
+- `status`
+- `attempts`
+- `available_at`
+- `created_at`
+- `updated_at`
+- lock, publish, and error metadata for future publisher workers
+
+Current constraints:
+
+- `id` is the primary key.
+- `status` must be `PENDING`, `IN_PROGRESS`, `PUBLISHED`, or `FAILED`.
+- `attempts` must be non-negative.
+
+Current indexes:
+
+- partial index on pending events by availability time for future publisher claim scans.
+- aggregate lookup index on aggregate type, aggregate id, and creation time.
+
+Payment authorization currently writes a `payment.authorized` event. Payment capture writes a `payment.captured` event. In Postgres mode, those event inserts run inside the payment service transaction with payer, payment, and hold mutations.
+
+## 8. Migration Runner
 
 The migration runner lives at:
 
@@ -181,7 +213,7 @@ Run it with:
 PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=disable' go run ./cmd/paycore-migrate
 ```
 
-## 8. Current Runtime Relationship
+## 9. Current Runtime Relationship
 
 The PayCore API does not run migrations automatically. Migrations are applied manually through `cmd/paycore-migrate`.
 
@@ -204,7 +236,7 @@ go run ./cmd/paycore-api
 
 In Postgres mode, merchant, payer, payment, hold, and idempotency repositories use PostgreSQL.
 
-## 9. Manual Usage
+## 10. Manual Usage
 
 With local PostgreSQL running:
 
@@ -226,9 +258,9 @@ Run the command repeatedly as needed. Already-applied migrations are skipped.
 - [x] Add payer table migration.
 - [x] Add payment and hold migrations.
 - [x] Add idempotency record migration.
+- [x] Add outbox event migration.
 - [x] Add migration runner.
 - [ ] Add settlement migration.
-- [ ] Add outbox migration.
 - [x] Add PostgreSQL repository adapters.
 - [x] Wire API runtime to PostgreSQL repository adapters.
 - [x] Add Postgres-backed HTTP lifecycle smoke test.

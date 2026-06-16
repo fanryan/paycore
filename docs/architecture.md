@@ -212,7 +212,7 @@ Payment Service
   +--> complete idempotency record with response
 ```
 
-In memory mode, these flows remain process-local and are not durable. In Postgres mode, `payment.Service` uses `internal/shared/db.Transactor` so payer balance mutation, payment mutation, and hold mutation share one database transaction through context propagation. HTTP idempotency record start/completion still happens outside the payment service transaction; folding idempotency completion and future outbox writes into the same durable boundary is planned.
+In memory mode, these flows remain process-local and are not durable. In Postgres mode, `payment.Service` uses `internal/shared/db.Transactor` so payer balance mutation, payment mutation, hold mutation, and outbox event creation share one database transaction through context propagation. HTTP idempotency record start/completion still happens outside the payment service transaction; folding idempotency completion into the same durable boundary is planned. Outbox publishing to Kafka is also planned.
 
 ## Current Local Infrastructure
 

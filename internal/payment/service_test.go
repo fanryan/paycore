@@ -2,16 +2,20 @@ package payment_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
 
 	"github.com/fanryan/paycore/internal/merchant"
 	merchantmemory "github.com/fanryan/paycore/internal/merchant/adapters/memory"
+	"github.com/fanryan/paycore/internal/outbox"
+	outboxmemory "github.com/fanryan/paycore/internal/outbox/adapters/memory"
 	"github.com/fanryan/paycore/internal/payer"
 	payermemory "github.com/fanryan/paycore/internal/payer/adapters/memory"
 	"github.com/fanryan/paycore/internal/payment"
 	paymentmemory "github.com/fanryan/paycore/internal/payment/adapters/memory"
+	"github.com/fanryan/paycore/internal/shared/db"
 )
 
 func TestServiceAuthorizesPayment(t *testing.T) {
@@ -93,6 +97,19 @@ func TestServiceAuthorizesPayment(t *testing.T) {
 
 	if storedPayer.HeldBalanceMinor != 4_000 {
 		t.Fatalf("expected stored held balance 4000, got %d", storedPayer.HeldBalanceMinor)
+	}
+
+	event := assertOutboxEvent(t, fixture, "payment.authorized", result.Payment.ID)
+
+	var payload map[string]any
+	decodePayload(t, event, &payload)
+
+	if payload["payment_id"] != result.Payment.ID {
+		t.Fatalf("expected outbox payment_id %q, got %v", result.Payment.ID, payload["payment_id"])
+	}
+
+	if payload["hold_id"] != result.Hold.ID {
+		t.Fatalf("expected outbox hold_id %q, got %v", result.Hold.ID, payload["hold_id"])
 	}
 }
 
@@ -236,6 +253,19 @@ func TestServiceCapturesPayment(t *testing.T) {
 	if storedPayer.HeldBalanceMinor != 0 {
 		t.Fatalf("expected stored held balance 0, got %d", storedPayer.HeldBalanceMinor)
 	}
+
+	event := assertOutboxEvent(t, fixture, "payment.captured", result.Payment.ID)
+
+	var payload map[string]any
+	decodePayload(t, event, &payload)
+
+	if payload["payment_id"] != result.Payment.ID {
+		t.Fatalf("expected outbox payment_id %q, got %v", result.Payment.ID, payload["payment_id"])
+	}
+
+	if payload["hold_id"] != result.Hold.ID {
+		t.Fatalf("expected outbox hold_id %q, got %v", result.Hold.ID, payload["hold_id"])
+	}
 }
 
 func TestServiceRejectsMissingPaymentOnCapture(t *testing.T) {
@@ -352,6 +382,7 @@ type fixture struct {
 	merchants *merchantmemory.Store
 	payers    *payermemory.Store
 	payments  *paymentmemory.Store
+	outbox    *outboxmemory.Store
 	service   *payment.Service
 }
 
@@ -362,6 +393,7 @@ func newFixture(t *testing.T) fixture {
 	merchants := merchantmemory.NewStore()
 	payers := payermemory.NewStore()
 	payments := paymentmemory.NewStore()
+	outboxStore := outboxmemory.NewStore()
 
 	merchantRecord, err := merchant.NewMerchant("merchant-1", "Demo Merchant", "USD", testNow())
 	if err != nil {
@@ -385,7 +417,14 @@ func newFixture(t *testing.T) fixture {
 		merchants: merchants,
 		payers:    payers,
 		payments:  payments,
-		service:   payment.NewService(merchants, payers, payments),
+		outbox:    outboxStore,
+		service: payment.NewServiceWithTransactorAndOutbox(
+			merchants,
+			payers,
+			payments,
+			db.NoopTransactor{},
+			outboxStore,
+		),
 	}
 }
 
@@ -443,6 +482,32 @@ func testHold(t *testing.T, holdID string, paymentID string) payment.Hold {
 	}
 
 	return hold
+}
+
+func assertOutboxEvent(t *testing.T, fixture fixture, eventType string, aggregateID string) outbox.Event {
+	t.Helper()
+
+	events, err := fixture.outbox.ListEvents(context.Background())
+	if err != nil {
+		t.Fatalf("expected outbox list to succeed, got error: %v", err)
+	}
+
+	for _, event := range events {
+		if event.EventType == eventType && event.AggregateID == aggregateID {
+			return event
+		}
+	}
+
+	t.Fatalf("expected outbox event %q for aggregate %q", eventType, aggregateID)
+	return outbox.Event{}
+}
+
+func decodePayload(t *testing.T, event outbox.Event, target any) {
+	t.Helper()
+
+	if err := json.Unmarshal(event.Payload, target); err != nil {
+		t.Fatalf("expected outbox payload to decode, got error: %v", err)
+	}
 }
 
 func testNow() time.Time {
