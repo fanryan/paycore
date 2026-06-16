@@ -1,6 +1,6 @@
 # Local Infrastructure
 
-This document explains the current PayCore local infrastructure setup as it exists today. It is written for resume and interview preparation, so it focuses on what runs locally, what each dependency is for, what is intentionally not wired into the app yet, and what is planned next.
+This document explains the current PayCore local infrastructure setup as it exists today. It is written for resume and interview preparation, so it focuses on what runs locally, what each dependency is for, what is wired into the app today, and what is planned next.
 
 ## 1. Current Infrastructure Scope
 
@@ -14,6 +14,7 @@ The repository currently provides Docker Compose services for:
 - Health checks for PostgreSQL and Redis.
 - Local environment template in `.env.example`.
 - PostgreSQL merchant, payer, payment, hold, and idempotency schema migrations.
+- PostgreSQL repository runtime mode through `PAYCORE_REPOSITORY_BACKEND=postgres`.
 
 Current services:
 
@@ -26,10 +27,8 @@ paycore-redis
 
 These are planned but not currently implemented:
 
-- Application runtime connection to PostgreSQL.
 - Application runtime connection to Redis.
-- PostgreSQL payment, idempotency, settlement, and outbox migrations.
-- Runtime wiring from the API to PostgreSQL repository adapters.
+- PostgreSQL settlement and outbox migrations.
 - Redis rate limiter.
 - Redis idempotency response cache.
 - Kafka broker.
@@ -124,11 +123,21 @@ PAYCORE_DATABASE_URL=postgres://paycore:paycore@localhost:5432/paycore?sslmode=d
 PAYCORE_REDIS_ADDR=localhost:6379
 ```
 
-The app currently loads the database URL and Redis address into shared configuration, but does not connect to PostgreSQL or Redis at runtime yet.
+The app currently loads the database URL, Redis address, and repository backend into shared configuration.
+
+The API can run with PostgreSQL repositories when started with:
+
+```bash
+PAYCORE_REPOSITORY_BACKEND=postgres \
+PAYCORE_DATABASE_URL=postgres://paycore:paycore@localhost:5432/paycore?sslmode=disable \
+go run ./cmd/paycore-api
+```
+
+Redis is available in Docker Compose, but Redis-backed rate limiting and idempotency response caching are not implemented yet.
 
 ## 6. Tests
 
-Current automated tests do not require Docker Compose.
+Default automated tests do not require Docker Compose.
 
 Existing tests use in-memory repositories and can run with:
 
@@ -136,7 +145,7 @@ Existing tests use in-memory repositories and can run with:
 go test ./...
 ```
 
-PostgreSQL repository adapter tests run against local PostgreSQL when `PAYCORE_DATABASE_URL` is set. Redis integration tests are planned once Redis-backed adapters exist.
+PostgreSQL repository adapter tests and the API Postgres smoke test run against local PostgreSQL when `PAYCORE_DATABASE_URL` is set. Redis integration tests are planned once Redis-backed adapters exist.
 
 Schema migrations are plain SQL and are applied by the local `paycore-migrate` command.
 

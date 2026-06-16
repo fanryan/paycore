@@ -38,6 +38,7 @@ Current development stage:
 - Payer entity, service, repository interface, and in-memory adapter implemented
 - PostgreSQL repository adapters implemented for merchant, payer, payment, holds, and idempotency records
 - PostgreSQL merchant, payer, payment, hold, and idempotency schema migrations added
+- Runtime repository backend switch implemented with `PAYCORE_REPOSITORY_BACKEND=memory|postgres`
 - Merchant HTTP create and list endpoints implemented
 - Payer HTTP create and list endpoints implemented
 - Payer balance reservation, release, and held-capture behavior implemented
@@ -55,6 +56,7 @@ Current development stage:
 - Merchant and payer unit tests added
 - Merchant and payer handler tests added
 - Payment service, handler, repository, entity, hold, idempotency, and router tests added
+- Postgres-backed HTTP smoke test added for merchant creation, payer creation, authorization, capture, and persisted payment reload
 
 Implemented endpoints:
 
@@ -170,6 +172,14 @@ Run all tests:
 go test ./...
 ```
 
+By default, tests use in-memory repositories and skip PostgreSQL integration paths unless `PAYCORE_DATABASE_URL` is set. To include Postgres adapter and API smoke coverage, start Postgres, run migrations, then test with the database URL:
+
+```bash
+docker compose up -d postgres
+PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=disable' go run ./cmd/paycore-migrate
+PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=disable' go test ./...
+```
+
 ## Current Repository Structure
 
 ```text
@@ -177,6 +187,7 @@ paycore/
   cmd/
     paycore-api/
       main.go
+      main_test.go
     paycore-migrate/
       main.go
   internal/

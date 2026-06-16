@@ -33,8 +33,8 @@ These are planned but not currently implemented:
 - Automatic migration execution in app startup.
 - Settlement migrations.
 - Outbox migrations.
-- Runtime wiring from the API to PostgreSQL repository adapters.
-- Integration tests against local PostgreSQL.
+- Single transaction that updates payer balance, payment, hold, and idempotency state atomically.
+- Redis-backed idempotency response cache.
 
 ## 2. Migration Files
 
@@ -133,7 +133,7 @@ Current constraints:
 - `currency` must be uppercase.
 - `status` must match the current hold status constants.
 
-`payments.authorization_hold_id` is kept as text for now to avoid circular foreign keys between payments and holds. The repository transaction will enforce the relationship when durable adapters are added.
+`payments.authorization_hold_id` is kept as text for now to avoid circular foreign keys between payments and holds. The service currently persists the payment before the hold so the hold can reference the existing payment row. A future transaction boundary should make payer balance updates, payment creation, hold creation, and idempotency completion atomic.
 
 ## 6. Idempotency Schema
 
@@ -183,9 +183,9 @@ PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=
 
 ## 8. Current Runtime Relationship
 
-The PayCore API does not yet run these migrations or connect repositories to PostgreSQL.
+The PayCore API does not run migrations automatically. Migrations are applied manually through `cmd/paycore-migrate`.
 
-Current runtime repositories remain in memory:
+The API can run with either memory repositories or PostgreSQL repositories. Memory remains the default:
 
 ```text
 merchant memory repository
@@ -194,7 +194,15 @@ payment memory repository
 idempotency memory repository
 ```
 
-The migrations exist to prepare for durable repository adapters.
+PostgreSQL runtime mode is enabled with:
+
+```bash
+PAYCORE_REPOSITORY_BACKEND=postgres \
+PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=disable' \
+go run ./cmd/paycore-api
+```
+
+In Postgres mode, merchant, payer, payment, hold, and idempotency repositories use PostgreSQL.
 
 ## 9. Manual Usage
 
@@ -223,3 +231,5 @@ Run the command repeatedly as needed. Already-applied migrations are skipped.
 - [ ] Add outbox migration.
 - [x] Add PostgreSQL repository adapters.
 - [x] Wire API runtime to PostgreSQL repository adapters.
+- [x] Add Postgres-backed HTTP lifecycle smoke test.
+- [ ] Add transaction boundary around authorization and capture mutations.

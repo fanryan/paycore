@@ -129,12 +129,12 @@ func (s *Service) AuthorizePayment(ctx context.Context, input AuthorizePaymentIn
 		return AuthorizePaymentResult{}, err
 	}
 
-	createdHold, err := s.payments.CreateHold(ctx, hold)
+	createdPayment, err := s.payments.CreatePayment(ctx, paymentRecord)
 	if err != nil {
 		return AuthorizePaymentResult{}, err
 	}
 
-	createdPayment, err := s.payments.CreatePayment(ctx, paymentRecord)
+	createdHold, err := s.payments.CreateHold(ctx, hold)
 	if err != nil {
 		return AuthorizePaymentResult{}, err
 	}

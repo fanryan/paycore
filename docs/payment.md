@@ -1,6 +1,6 @@
 # Payment
 
-This document explains the current PayCore payment implementation as it exists today. It is written for resume and interview preparation, so it focuses on how the code works, what decisions were made, what is intentionally still in-memory, and what is planned next.
+This document explains the current PayCore payment implementation as it exists today. It is written for resume and interview preparation, so it focuses on how the code works, what decisions were made, what is durable in PostgreSQL mode, and what is planned next.
 
 ## 1. Current Payment Scope
 
@@ -46,7 +46,7 @@ The Go API currently supports the payment foundation:
   - creates a hold
   - creates an authorized payment
   - reserves payer balance
-  - persists payer, hold, and payment through in-memory repositories
+  - persists payer, payment, and hold through configured repositories
 - Internal capture service that:
   - loads payment
   - loads payment hold
@@ -56,12 +56,14 @@ The Go API currently supports the payment foundation:
   - captures the payment
   - captures the hold
   - deducts payer held balance
-  - persists payer, hold, and payment through in-memory repositories
+  - persists payer, hold, and payment through configured repositories
 - Payment authorization HTTP handler in `internal/payment/handler.go`.
 - Payment capture HTTP handler in `internal/payment/handler.go`.
 - Payment authorization response recording in `internal/payment/response_recorder.go` for local idempotency replay.
 - `POST /payments/authorize` route composed through `internal/http/router.go`.
 - `POST /payments/{payment_id}/capture` route composed through `internal/http/router.go`.
+- Runtime repository backend switch through `PAYCORE_REPOSITORY_BACKEND=memory|postgres`.
+- Postgres-backed HTTP smoke test in `cmd/paycore-api/main_test.go`.
 - Entity, hold, repository, service, handler, and router tests.
 
 ### Not Implemented Yet
@@ -71,9 +73,7 @@ These are planned but not currently implemented:
 - `GET /payments/{payment_id}`.
 - Redis-backed rate limiting.
 - Redis-backed idempotency response cache.
-- Durable PostgreSQL idempotency records.
-- Runtime wiring from the API to the PostgreSQL payment repository.
-- PostgreSQL payer balance transaction.
+- Single PostgreSQL transaction around payer balance, payment, hold, and idempotency writes.
 - Transactional outbox event creation.
 - Kafka event publishing.
 - Authorization expiry worker.
@@ -124,15 +124,15 @@ main()
   |
   +--> loads shared config from environment
   +--> creates JSON slog logger
-  +--> creates merchant memory repository
-  +--> creates payer memory repository
+  +--> creates memory repositories by default
+  +--> creates PostgreSQL repositories when PAYCORE_REPOSITORY_BACKEND=postgres
   +--> creates merchant and payer handlers
   +--> creates payment repository, service, and handler
   +--> creates internal/http chi router
   +--> starts net/http server
 ```
 
-Payment dependencies are wired in `main.go` with the in-memory repository adapter.
+Payment dependencies are wired in `main.go`. Memory repositories are the default. PostgreSQL repositories are enabled with `PAYCORE_REPOSITORY_BACKEND=postgres` and `PAYCORE_DATABASE_URL`.
 
 ### Payment Package Boundary
 
@@ -148,6 +148,7 @@ internal/payment
   +--> handler.go
   |
   +--> adapters/memory/repository.go
+  +--> adapters/postgres/repository.go
 ```
 
 The feature package owns payment lifecycle rules. The HTTP package composes payment routes through the central chi router.
@@ -201,8 +202,8 @@ payment.AuthorizePaymentInput{
 19. Service creates an `AUTHORIZED` payment with a 15-minute expiry.
 20. Service reserves payer funds by moving amount from available balance to held balance.
 21. Service persists the updated payer.
-22. Service persists the hold.
-23. Service persists the payment.
+22. Service persists the payment.
+23. Service persists the hold.
 24. Handler records the successful response against the idempotency key.
 25. Handler returns the authorization response as JSON.
 
@@ -240,8 +241,8 @@ Payment Service
   +--> NewAuthorizedPayment
   |
   +--> PayerRepository.UpdatePayer
-  +--> PaymentRepository.CreateHold
   +--> PaymentRepository.CreatePayment
+  +--> PaymentRepository.CreateHold
   |
   v
 AuthorizePaymentResult
@@ -443,23 +444,21 @@ The current idempotency adapter also stores records in memory. This supports loc
 
 ### Current Consistency Limitation
 
-The authorization and capture services write payer, hold, and payment records through separate in-memory calls.
+The authorization and capture services write payer, payment, and hold records through separate repository calls.
 
 That means this local implementation does not provide transactionality. If a later write fails after an earlier write succeeds, partial state is possible.
 
-This is acceptable for the current foundation only. PostgreSQL authorization and capture must later run payer balance mutation, hold mutation, payment mutation, idempotency persistence, and outbox event creation in one transaction.
+This is acceptable for the current foundation only. PostgreSQL authorization and capture must later run payer balance mutation, payment mutation, hold mutation, idempotency persistence, and outbox event creation in one transaction.
 
-### Planned PostgreSQL Adapter
+### PostgreSQL Adapter
 
-PostgreSQL persistence is planned but not implemented.
-
-Planned files:
+PostgreSQL persistence is implemented for payment and hold records in:
 
 ```text
 internal/payment/adapters/postgres/repository.go
 ```
 
-Planned durable records:
+Current durable records:
 
 - payments
 - payment holds
@@ -544,7 +543,7 @@ Provides the current non-durable in-memory payment repository implementation.
 
 `internal/payment/adapters/postgres/repository.go`
 
-Planned. Will own durable PostgreSQL payment and hold persistence.
+Owns durable PostgreSQL payment and hold persistence.
 
 ## Checklist
 
@@ -562,5 +561,7 @@ Planned. Will own durable PostgreSQL payment and hold persistence.
 - [x] Add PostgreSQL payment and hold migrations.
 - [x] Add PostgreSQL payment and hold repository.
 - [x] Wire API runtime to PostgreSQL payment repository.
+- [x] Add Postgres-backed HTTP lifecycle smoke test.
+- [ ] Add transaction boundary around authorization and capture mutations.
 - [ ] Add durable authorization transaction.
 - [ ] Add transactional outbox event for `payment.authorized`.
