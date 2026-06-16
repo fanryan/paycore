@@ -313,5 +313,5 @@ Planned. Will own durable PostgreSQL merchant persistence.
 - [x] Add merchant handler tests.
 - [x] Add PostgreSQL migration for merchants.
 - [x] Add PostgreSQL merchant repository.
-- [ ] Wire API runtime to PostgreSQL merchant repository.
+- [x] Wire API runtime to PostgreSQL merchant repository.
 - [ ] Document final merchant request and response contracts.

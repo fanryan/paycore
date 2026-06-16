@@ -70,9 +70,9 @@ POST /payments/authorize
 POST /payments/{payment_id}/capture
 ```
 
-Runtime wiring to PostgreSQL, Redis, Kafka, Prometheus, settlement processing, and outbox publishing has not been implemented yet. Docker Compose currently starts local PostgreSQL and Redis. PostgreSQL repository adapters exist, but the API still uses in-memory repositories at runtime.
+Runtime wiring to PostgreSQL repositories is available through `PAYCORE_REPOSITORY_BACKEND=postgres`. Memory repositories remain the default. Redis, Kafka, Prometheus, settlement processing, and outbox publishing have not been implemented yet.
 
-Payment authorization and capture are currently local and in-memory. They enforce `Idempotency-Key` through an in-memory repository, but do not yet use durable PostgreSQL idempotency records, Redis response caching, Redis rate limiting, durable PostgreSQL payment transactions, or outbox event creation.
+Payment authorization and capture enforce `Idempotency-Key`. In memory mode, idempotency records are process-local. In Postgres mode, merchant, payer, payment, hold, and idempotency records use PostgreSQL repositories.
 
 ## Run Locally
 
@@ -102,6 +102,14 @@ Start the API server:
 go run ./cmd/paycore-api
 ```
 
+Start the API server with PostgreSQL repositories:
+
+```bash
+PAYCORE_REPOSITORY_BACKEND=postgres \
+PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=disable' \
+go run ./cmd/paycore-api
+```
+
 The API listens on port `8080` by default.
 
 Override the address:
@@ -118,6 +126,7 @@ Supported local configuration:
 | `PAYCORE_HTTP_ADDR` | `:8080` | HTTP listen address |
 | `PAYCORE_HTTP_READ_HEADER_TIMEOUT_SECONDS` | `5` | HTTP read header timeout in seconds |
 | `PAYCORE_HTTP_SHUTDOWN_TIMEOUT_SECONDS` | `10` | Graceful shutdown timeout in seconds |
+| `PAYCORE_REPOSITORY_BACKEND` | `memory` | Repository backend: `memory` or `postgres` |
 | `PAYCORE_DATABASE_URL` | empty | PostgreSQL connection string for migrations and repository adapters |
 | `PAYCORE_REDIS_ADDR` | `localhost:6379` | Redis address loaded for upcoming rate limiting and cache adapters |
 

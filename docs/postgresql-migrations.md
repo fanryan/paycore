@@ -222,4 +222,4 @@ Run the command repeatedly as needed. Already-applied migrations are skipped.
 - [ ] Add settlement migration.
 - [ ] Add outbox migration.
 - [x] Add PostgreSQL repository adapters.
-- [ ] Wire API runtime to PostgreSQL repository adapters.
+- [x] Wire API runtime to PostgreSQL repository adapters.

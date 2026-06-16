@@ -177,7 +177,7 @@ Applies local PostgreSQL migrations and records applied files in `schema_migrati
 - [x] Add PostgreSQL payment and idempotency migrations.
 - [x] Add migration runner.
 - [x] Add PostgreSQL repository adapters.
-- [ ] Wire API runtime to PostgreSQL repository adapters.
+- [x] Wire API runtime to PostgreSQL repository adapters.
 - [ ] Add Redis rate limiter.
 - [ ] Add Redis idempotency response cache.
 - [ ] Add Kafka service.

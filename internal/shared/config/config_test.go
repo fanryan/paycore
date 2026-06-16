@@ -12,6 +12,7 @@ func TestLoadUsesDefaults(t *testing.T) {
 	t.Setenv("PAYCORE_HTTP_SHUTDOWN_TIMEOUT_SECONDS", "")
 	t.Setenv("PAYCORE_DATABASE_URL", "")
 	t.Setenv("PAYCORE_REDIS_ADDR", "")
+	t.Setenv("PAYCORE_REPOSITORY_BACKEND", "")
 
 	cfg := Load()
 
@@ -38,6 +39,10 @@ func TestLoadUsesDefaults(t *testing.T) {
 	if cfg.RedisAddr != "localhost:6379" {
 		t.Fatalf("expected redis addr localhost:6379, got %q", cfg.RedisAddr)
 	}
+
+	if cfg.RepositoryBackend != "memory" {
+		t.Fatalf("expected repository backend memory, got %q", cfg.RepositoryBackend)
+	}
 }
 
 func TestLoadUsesEnvironmentOverrides(t *testing.T) {
@@ -47,6 +52,7 @@ func TestLoadUsesEnvironmentOverrides(t *testing.T) {
 	t.Setenv("PAYCORE_HTTP_SHUTDOWN_TIMEOUT_SECONDS", "12")
 	t.Setenv("PAYCORE_DATABASE_URL", "postgres://paycore:paycore@localhost:5432/paycore?sslmode=disable")
 	t.Setenv("PAYCORE_REDIS_ADDR", "redis:6379")
+	t.Setenv("PAYCORE_REPOSITORY_BACKEND", "postgres")
 
 	cfg := Load()
 
@@ -72,6 +78,10 @@ func TestLoadUsesEnvironmentOverrides(t *testing.T) {
 
 	if cfg.RedisAddr != "redis:6379" {
 		t.Fatalf("expected redis addr redis:6379, got %q", cfg.RedisAddr)
+	}
+
+	if cfg.RepositoryBackend != "postgres" {
+		t.Fatalf("expected repository backend postgres, got %q", cfg.RepositoryBackend)
 	}
 }
 

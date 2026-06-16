@@ -347,6 +347,6 @@ Planned. Will own durable PostgreSQL payer persistence and optimistic concurrenc
 - [x] Add payer handler tests.
 - [x] Add PostgreSQL migration for payers.
 - [x] Add PostgreSQL payer repository.
-- [ ] Wire API runtime to PostgreSQL payer repository.
+- [x] Wire API runtime to PostgreSQL payer repository.
 - [ ] Implement durable optimistic concurrency for balance mutation.
 - [ ] Document final payer request and response contracts.

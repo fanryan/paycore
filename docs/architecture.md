@@ -223,6 +223,6 @@ paycore-postgres
 paycore-redis
 ```
 
-These services are not connected to the API runtime yet. PostgreSQL repository adapters exist for merchant, payer, payment, holds, and idempotency records, but `cmd/paycore-api` still wires in-memory repositories. Redis rate limiting and Redis idempotency response caching are still planned.
+The API can run with memory repositories or PostgreSQL repositories. Memory remains the default. `PAYCORE_REPOSITORY_BACKEND=postgres` wires merchant, payer, payment, hold, and idempotency repositories to PostgreSQL. Redis rate limiting and Redis idempotency response caching are still planned.
 
 The repository also includes initial plain SQL migrations for merchant, payer, payment, hold, and idempotency tables. They can be applied locally with `go run ./cmd/paycore-migrate`.

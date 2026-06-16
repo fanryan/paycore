@@ -13,6 +13,7 @@ type Config struct {
 	HTTPShutdownTimeout   time.Duration
 	DatabaseURL           string
 	RedisAddr             string
+	RepositoryBackend     string
 }
 
 func Load() Config {
@@ -23,6 +24,7 @@ func Load() Config {
 		HTTPShutdownTimeout:   durationSeconds("PAYCORE_HTTP_SHUTDOWN_TIMEOUT_SECONDS", 10*time.Second),
 		DatabaseURL:           getenv("PAYCORE_DATABASE_URL", ""),
 		RedisAddr:             getenv("PAYCORE_REDIS_ADDR", "localhost:6379"),
+		RepositoryBackend:     getenv("PAYCORE_REPOSITORY_BACKEND", "memory"),
 	}
 }
 

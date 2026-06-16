@@ -561,6 +561,6 @@ Planned. Will own durable PostgreSQL payment and hold persistence.
 - [ ] Add Redis-backed rate limiting.
 - [x] Add PostgreSQL payment and hold migrations.
 - [x] Add PostgreSQL payment and hold repository.
-- [ ] Wire API runtime to PostgreSQL payment repository.
+- [x] Wire API runtime to PostgreSQL payment repository.
 - [ ] Add durable authorization transaction.
 - [ ] Add transactional outbox event for `payment.authorized`.

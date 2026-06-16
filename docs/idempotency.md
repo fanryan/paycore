@@ -334,6 +334,6 @@ Captures response status and body for payment authorization and capture replay.
 - [x] Enforce `Idempotency-Key` on payment capture.
 - [x] Add PostgreSQL idempotency record migration.
 - [x] Add PostgreSQL durable idempotency repository.
-- [ ] Wire API runtime to PostgreSQL idempotency repository.
+- [x] Wire API runtime to PostgreSQL idempotency repository.
 - [ ] Add Redis idempotency response cache.
 - [ ] Add idempotency metrics.
