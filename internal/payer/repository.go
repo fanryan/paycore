@@ -6,8 +6,9 @@ import (
 )
 
 var (
-	ErrPayerNotFound  = errors.New("payer not found")
-	ErrDuplicatePayer = errors.New("payer already exists")
+	ErrPayerNotFound        = errors.New("payer not found")
+	ErrDuplicatePayer       = errors.New("payer already exists")
+	ErrPayerVersionConflict = errors.New("payer version conflict")
 )
 
 type PayerRepository interface {

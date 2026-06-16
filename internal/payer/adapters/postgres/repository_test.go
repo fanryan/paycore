@@ -100,6 +100,49 @@ func TestRepositoryRejectsDuplicatePayer(t *testing.T) {
 	}
 }
 
+func TestRepositoryRejectsStalePayerVersion(t *testing.T) {
+	ctx := context.Background()
+	pool := newTestPool(t)
+	store := payerpostgres.NewStore(pool)
+	prefix := testPrefix()
+	t.Cleanup(func() {
+		cleanupPayers(t, pool, prefix)
+	})
+
+	created, err := store.CreatePayer(ctx, testPayer(t, prefix+"-payer-1", 10_000, testNow()))
+	if err != nil {
+		t.Fatalf("expected payer create to succeed, got error: %v", err)
+	}
+
+	firstUpdate, err := created.Reserve(4_000, "USD", testNow().Add(time.Minute))
+	if err != nil {
+		t.Fatalf("expected first reserve to succeed, got error: %v", err)
+	}
+
+	if _, err := store.UpdatePayer(ctx, firstUpdate); err != nil {
+		t.Fatalf("expected first payer update to succeed, got error: %v", err)
+	}
+
+	staleUpdate, err := created.Reserve(3_000, "USD", testNow().Add(2*time.Minute))
+	if err != nil {
+		t.Fatalf("expected stale reserve to succeed, got error: %v", err)
+	}
+
+	_, err = store.UpdatePayer(ctx, staleUpdate)
+	if !errors.Is(err, payer.ErrPayerVersionConflict) {
+		t.Fatalf("expected ErrPayerVersionConflict, got %v", err)
+	}
+
+	got, err := store.GetPayer(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("expected payer get to succeed, got error: %v", err)
+	}
+
+	if got.AvailableBalanceMinor != 6_000 {
+		t.Fatalf("expected available balance to remain 6000, got %d", got.AvailableBalanceMinor)
+	}
+}
+
 func TestRepositoryReturnsNotFoundForMissingPayer(t *testing.T) {
 	ctx := context.Background()
 	pool := newTestPool(t)

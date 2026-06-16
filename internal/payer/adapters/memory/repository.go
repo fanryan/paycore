@@ -75,8 +75,13 @@ func (s *Store) UpdatePayer(ctx context.Context, payerRecord payer.Payer) (payer
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if _, exists := s.payers[payerRecord.ID]; !exists {
+	current, exists := s.payers[payerRecord.ID]
+	if !exists {
 		return payer.Payer{}, payer.ErrPayerNotFound
+	}
+
+	if payerRecord.Version != current.Version+1 {
+		return payer.Payer{}, payer.ErrPayerVersionConflict
 	}
 
 	s.payers[payerRecord.ID] = payerRecord

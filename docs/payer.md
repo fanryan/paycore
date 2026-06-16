@@ -26,19 +26,16 @@ The Go API currently supports the payer foundation:
 - `Payer.CanAuthorize(...)` predicate for amount, currency, and available balance checks.
 - Repository errors for not-found and duplicate payer records.
 - Payer create and list routes composed through `internal/http/router.go`.
+- Optimistic concurrency enforcement for payer updates in memory and PostgreSQL repositories.
 - Entity, service, handler, router, and in-memory repository tests.
 
 ### Not Implemented Yet
 
 These are planned but not currently implemented:
 
-- Runtime wiring from the API to the PostgreSQL payer repository.
-- Optimistic concurrency enforcement in durable persistence.
-- Balance hold mutation methods.
-- Authorization hold creation.
-- Capture hold conversion.
-- Authorization expiry hold release.
-- Integration with payment authorization and capture flows.
+- `GET /payers/{payer_id}`.
+- Dedicated payer balance adjustment endpoint.
+- Authorization expiry hold release workflow.
 
 ### Public Endpoints
 
@@ -88,7 +85,7 @@ main()
   +--> starts net/http server
 ```
 
-Payer dependencies are wired in `main.go` with the in-memory repository adapter.
+Payer dependencies are wired in `main.go`. Memory repositories are the default. PostgreSQL repositories are enabled with `PAYCORE_REPOSITORY_BACKEND=postgres` and `PAYCORE_DATABASE_URL`.
 
 ### Payer Package Boundary
 
@@ -103,6 +100,7 @@ internal/payer
   +--> handler.go
   |
   +--> adapters/memory/repository.go
+  +--> adapters/postgres/repository.go
 ```
 
 The feature package owns payer rules and HTTP request/response mapping. The central HTTP package composes the payer handler into the shared router.
@@ -177,6 +175,7 @@ Repository operations currently return:
 ```text
 ErrDuplicatePayer
 ErrPayerNotFound
+ErrPayerVersionConflict
 ```
 
 Current HTTP error mapping:
@@ -185,6 +184,12 @@ Current HTTP error mapping:
 validation error    -> HTTP 400
 ErrDuplicatePayer   -> HTTP 409
 ErrPayerNotFound    -> HTTP 404
+```
+
+When payment authorization or capture hits a payer version conflict, the payment handler maps it to:
+
+```text
+PAYER_VERSION_CONFLICT -> HTTP 409
 ```
 
 ## 4. Authorization Predicate
@@ -267,19 +272,17 @@ map[string]payer.Payer
 
 It uses a mutex for concurrent map access and checks `context.Context` before work.
 
-This adapter is useful for local API development before PostgreSQL exists. It is not durable.
+This adapter is useful for local API development and unit tests. It is not durable.
 
-### Planned PostgreSQL Adapter
+### PostgreSQL Adapter
 
-PostgreSQL persistence is planned but not implemented.
-
-Planned file:
+PostgreSQL persistence is implemented in:
 
 ```text
 internal/payer/adapters/postgres/repository.go
 ```
 
-Planned durable fields:
+Durable fields:
 
 - payer id
 - available balance minor
@@ -289,7 +292,7 @@ Planned durable fields:
 - created timestamp
 - updated timestamp
 
-The `version` field is reserved for optimistic concurrency control when durable balance mutation is implemented.
+The `version` field is used for optimistic concurrency control. Repository updates require the incoming payer version to be exactly one greater than the stored version. If another update has already advanced the stored version, the repository returns `ErrPayerVersionConflict`.
 
 ## 7. Tests
 
@@ -303,6 +306,9 @@ Current tests cover:
 - service create/get/list behavior
 - repository not-found behavior
 - in-memory duplicate detection
+- in-memory payer version conflict detection
+- PostgreSQL duplicate detection
+- PostgreSQL payer version conflict detection
 - in-memory context cancellation behavior
 - handler create/list behavior
 - handler invalid JSON and duplicate error mapping
@@ -322,7 +328,7 @@ Defines `Payer`, `NewPayer`, and `CanAuthorize`.
 
 `internal/payer/repository.go`
 
-Defines `PayerRepository`, `ErrPayerNotFound`, and `ErrDuplicatePayer`.
+Defines `PayerRepository`, `ErrPayerNotFound`, `ErrDuplicatePayer`, and `ErrPayerVersionConflict`.
 
 `internal/payer/service.go`
 
@@ -330,7 +336,7 @@ Defines `PayerService` and coordinates payer creation and repository reads.
 
 `internal/payer/adapters/memory/repository.go`
 
-Provides the current non-durable in-memory repository implementation.
+Provides the current non-durable in-memory repository implementation, including optimistic version checks.
 
 `internal/payer/handler.go`
 
@@ -338,7 +344,7 @@ Owns payer HTTP request parsing, response mapping, and HTTP error mapping.
 
 `internal/payer/adapters/postgres/repository.go`
 
-Planned. Will own durable PostgreSQL payer persistence and optimistic concurrency behavior.
+Owns durable PostgreSQL payer persistence and optimistic concurrency behavior.
 
 ## Checklist
 
@@ -348,5 +354,5 @@ Planned. Will own durable PostgreSQL payer persistence and optimistic concurrenc
 - [x] Add PostgreSQL migration for payers.
 - [x] Add PostgreSQL payer repository.
 - [x] Wire API runtime to PostgreSQL payer repository.
-- [ ] Implement durable optimistic concurrency for balance mutation.
+- [x] Implement optimistic concurrency for balance mutation.
 - [ ] Document final payer request and response contracts.

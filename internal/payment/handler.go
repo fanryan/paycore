@@ -235,6 +235,11 @@ func authorizationErrorResponse(err error) (int, map[string]string) {
 			"error_code": "PAYER_NOT_FOUND",
 			"message":    "Payer not found",
 		}
+	case errors.Is(err, payer.ErrPayerVersionConflict):
+		return http.StatusConflict, map[string]string{
+			"error_code": "PAYER_VERSION_CONFLICT",
+			"message":    "Payer balance changed during payment authorization",
+		}
 	case errors.Is(err, ErrMerchantCannotCreatePayments):
 		return http.StatusConflict, map[string]string{
 			"error_code": "MERCHANT_CANNOT_CREATE_PAYMENTS",
@@ -274,6 +279,11 @@ func captureErrorResponse(err error) (int, map[string]string) {
 		return http.StatusNotFound, map[string]string{
 			"error_code": "PAYER_NOT_FOUND",
 			"message":    "Payer not found",
+		}
+	case errors.Is(err, payer.ErrPayerVersionConflict):
+		return http.StatusConflict, map[string]string{
+			"error_code": "PAYER_VERSION_CONFLICT",
+			"message":    "Payer balance changed during payment capture",
 		}
 	case errors.Is(err, ErrPaymentNotCapturable):
 		return http.StatusConflict, map[string]string{

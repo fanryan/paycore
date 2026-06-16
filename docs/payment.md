@@ -258,6 +258,7 @@ Current authorization failures include:
 ```text
 merchant.ErrMerchantNotFound
 payer.ErrPayerNotFound
+payer.ErrPayerVersionConflict
 payment.ErrMerchantCannotCreatePayments
 payment.ErrPayerCurrencyMismatch
 payment.ErrInsufficientAvailableBalance
@@ -271,6 +272,7 @@ Current HTTP error mapping:
 ```text
 missing merchant              -> HTTP 404
 missing payer                 -> HTTP 404
+payer version conflict        -> HTTP 409
 inactive merchant             -> HTTP 422 or 409
 currency mismatch             -> HTTP 422
 insufficient available balance -> HTTP 422
@@ -402,6 +404,7 @@ Current capture failures include:
 payment.ErrPaymentNotFound
 payment.ErrHoldNotFound
 payer.ErrPayerNotFound
+payer.ErrPayerVersionConflict
 payment.ErrPaymentNotCapturable
 payment.ErrAuthorizationExpired
 idempotency.ErrRequestHashMismatch
@@ -415,6 +418,7 @@ Current HTTP error mapping:
 missing payment         -> HTTP 404
 missing hold            -> HTTP 404
 missing payer           -> HTTP 404
+payer version conflict  -> HTTP 409
 not capturable          -> HTTP 409
 authorization expired    -> HTTP 422
 missing idempotency key  -> HTTP 400

@@ -137,33 +137,55 @@ func (s *Store) UpdatePayer(ctx context.Context, payerRecord payer.Payer) (payer
 			version = $5,
 			updated_at = $6
 		WHERE id = $1
-		RETURNING
-			id,
-			available_balance_minor,
-			held_balance_minor,
-			currency,
-			version,
-			created_at,
-			updated_at
+		AND version = $7
 	`
 
-	updated, err := scanPayer(s.pool.QueryRow(ctx, query,
+	previousVersion := payerRecord.Version - 1
+
+	commandTag, err := s.pool.Exec(ctx, query,
 		payerRecord.ID,
 		payerRecord.AvailableBalanceMinor,
 		payerRecord.HeldBalanceMinor,
 		payerRecord.Currency,
 		payerRecord.Version,
 		payerRecord.UpdatedAt,
-	))
+		previousVersion,
+	)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return payer.Payer{}, payer.ErrPayerNotFound
-		}
-
 		return payer.Payer{}, err
 	}
 
-	return updated, nil
+	if commandTag.RowsAffected() == 0 {
+		exists, err := s.payerExists(ctx, payerRecord.ID)
+		if err != nil {
+			return payer.Payer{}, err
+		}
+
+		if !exists {
+			return payer.Payer{}, payer.ErrPayerNotFound
+		}
+
+		return payer.Payer{}, payer.ErrPayerVersionConflict
+	}
+
+	return s.GetPayer(ctx, payerRecord.ID)
+}
+
+func (s *Store) payerExists(ctx context.Context, payerID string) (bool, error) {
+	const query = `
+		SELECT EXISTS (
+			SELECT 1
+			FROM payers
+			WHERE id = $1
+		)
+	`
+
+	var exists bool
+	if err := s.pool.QueryRow(ctx, query, payerID).Scan(&exists); err != nil {
+		return false, err
+	}
+
+	return exists, nil
 }
 
 type payerScanner interface {
