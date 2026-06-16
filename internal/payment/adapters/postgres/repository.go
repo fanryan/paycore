@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/fanryan/paycore/internal/payment"
+	"github.com/fanryan/paycore/internal/shared/db"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -57,7 +58,7 @@ func (s *Store) CreatePayment(ctx context.Context, paymentRecord payment.Payment
 			updated_at
 	`
 
-	created, err := scanPayment(s.pool.QueryRow(ctx, query,
+	created, err := scanPayment(s.queryRow(ctx, query,
 		paymentRecord.ID,
 		paymentRecord.MerchantID,
 		paymentRecord.PayerID,
@@ -103,7 +104,7 @@ func (s *Store) GetPayment(ctx context.Context, paymentID string) (payment.Payme
 		WHERE id = $1
 	`
 
-	paymentRecord, err := scanPayment(s.pool.QueryRow(ctx, query, paymentID))
+	paymentRecord, err := scanPayment(s.queryRow(ctx, query, paymentID))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return payment.Payment{}, payment.ErrPaymentNotFound
@@ -147,7 +148,7 @@ func (s *Store) UpdatePayment(ctx context.Context, paymentRecord payment.Payment
 			updated_at
 	`
 
-	updated, err := scanPayment(s.pool.QueryRow(ctx, query,
+	updated, err := scanPayment(s.queryRow(ctx, query,
 		paymentRecord.ID,
 		paymentRecord.MerchantID,
 		paymentRecord.PayerID,
@@ -196,7 +197,7 @@ func (s *Store) CreateHold(ctx context.Context, hold payment.Hold) (payment.Hold
 			updated_at
 	`
 
-	created, err := scanHold(s.pool.QueryRow(ctx, query,
+	created, err := scanHold(s.queryRow(ctx, query,
 		hold.ID,
 		hold.PaymentID,
 		hold.PayerID,
@@ -232,7 +233,7 @@ func (s *Store) GetHold(ctx context.Context, holdID string) (payment.Hold, error
 		WHERE id = $1
 	`
 
-	hold, err := scanHold(s.pool.QueryRow(ctx, query, holdID))
+	hold, err := scanHold(s.queryRow(ctx, query, holdID))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return payment.Hold{}, payment.ErrHoldNotFound
@@ -259,7 +260,7 @@ func (s *Store) GetHoldByPaymentID(ctx context.Context, paymentID string) (payme
 		WHERE payment_id = $1
 	`
 
-	hold, err := scanHold(s.pool.QueryRow(ctx, query, paymentID))
+	hold, err := scanHold(s.queryRow(ctx, query, paymentID))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return payment.Hold{}, payment.ErrHoldNotFound
@@ -293,7 +294,7 @@ func (s *Store) UpdateHold(ctx context.Context, hold payment.Hold) (payment.Hold
 			updated_at
 	`
 
-	updated, err := scanHold(s.pool.QueryRow(ctx, query,
+	updated, err := scanHold(s.queryRow(ctx, query,
 		hold.ID,
 		hold.PaymentID,
 		hold.PayerID,
@@ -311,6 +312,14 @@ func (s *Store) UpdateHold(ctx context.Context, hold payment.Hold) (payment.Hold
 	}
 
 	return updated, nil
+}
+
+func (s *Store) queryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	if tx, ok := db.TxFromContext(ctx); ok {
+		return tx.QueryRow(ctx, sql, args...)
+	}
+
+	return s.pool.QueryRow(ctx, sql, args...)
 }
 
 type paymentScanner interface {

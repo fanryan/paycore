@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/fanryan/paycore/internal/payer"
+	"github.com/fanryan/paycore/internal/shared/db"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -44,7 +45,7 @@ func (s *Store) CreatePayer(ctx context.Context, payerRecord payer.Payer) (payer
 			updated_at
 	`
 
-	created, err := scanPayer(s.pool.QueryRow(ctx, query,
+	created, err := scanPayer(s.executor(ctx).QueryRow(ctx, query,
 		payerRecord.ID,
 		payerRecord.AvailableBalanceMinor,
 		payerRecord.HeldBalanceMinor,
@@ -78,7 +79,7 @@ func (s *Store) GetPayer(ctx context.Context, payerID string) (payer.Payer, erro
 		WHERE id = $1
 	`
 
-	payerRecord, err := scanPayer(s.pool.QueryRow(ctx, query, payerID))
+	payerRecord, err := scanPayer(s.executor(ctx).QueryRow(ctx, query, payerID))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return payer.Payer{}, payer.ErrPayerNotFound
@@ -104,7 +105,7 @@ func (s *Store) ListPayers(ctx context.Context) ([]payer.Payer, error) {
 		ORDER BY created_at ASC, id ASC
 	`
 
-	rows, err := s.pool.Query(ctx, query)
+	rows, err := s.executor(ctx).Query(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -142,7 +143,7 @@ func (s *Store) UpdatePayer(ctx context.Context, payerRecord payer.Payer) (payer
 
 	previousVersion := payerRecord.Version - 1
 
-	commandTag, err := s.pool.Exec(ctx, query,
+	commandTag, err := s.executor(ctx).Exec(ctx, query,
 		payerRecord.ID,
 		payerRecord.AvailableBalanceMinor,
 		payerRecord.HeldBalanceMinor,
@@ -181,11 +182,25 @@ func (s *Store) payerExists(ctx context.Context, payerID string) (bool, error) {
 	`
 
 	var exists bool
-	if err := s.pool.QueryRow(ctx, query, payerID).Scan(&exists); err != nil {
+	if err := s.executor(ctx).QueryRow(ctx, query, payerID).Scan(&exists); err != nil {
 		return false, err
 	}
 
 	return exists, nil
+}
+
+type executor interface {
+	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+func (s *Store) executor(ctx context.Context) executor {
+	if tx, ok := db.TxFromContext(ctx); ok {
+		return tx
+	}
+
+	return s.pool
 }
 
 type payerScanner interface {

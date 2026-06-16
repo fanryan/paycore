@@ -33,7 +33,7 @@ These are planned but not currently implemented:
 - Automatic migration execution in app startup.
 - Settlement migrations.
 - Outbox migrations.
-- Single transaction that updates payer balance, payment, hold, and idempotency state atomically.
+- Single transaction that also includes idempotency completion and future outbox writes.
 - Redis-backed idempotency response cache.
 
 ## 2. Migration Files
@@ -133,7 +133,7 @@ Current constraints:
 - `currency` must be uppercase.
 - `status` must match the current hold status constants.
 
-`payments.authorization_hold_id` is kept as text for now to avoid circular foreign keys between payments and holds. The service currently persists the payment before the hold so the hold can reference the existing payment row. A future transaction boundary should make payer balance updates, payment creation, hold creation, and idempotency completion atomic.
+`payments.authorization_hold_id` is kept as text for now to avoid circular foreign keys between payments and holds. The service currently persists the payment before the hold so the hold can reference the existing payment row. In Postgres mode, payer balance updates, payment creation, and hold creation run inside one transaction through `internal/shared/db.Transactor`. Idempotency completion is still handled outside that transaction and should be folded in later.
 
 ## 6. Idempotency Schema
 
@@ -232,4 +232,5 @@ Run the command repeatedly as needed. Already-applied migrations are skipped.
 - [x] Add PostgreSQL repository adapters.
 - [x] Wire API runtime to PostgreSQL repository adapters.
 - [x] Add Postgres-backed HTTP lifecycle smoke test.
-- [ ] Add transaction boundary around authorization and capture mutations.
+- [x] Add transaction boundary around authorization and capture business mutations.
+- [ ] Include durable idempotency completion in the transaction boundary.

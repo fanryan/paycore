@@ -208,11 +208,11 @@ Payment Service
   +--> mark payment CAPTURED
   +--> mark hold CAPTURED
   +--> deduct payer held balance
-  +--> persist payer, hold, and payment in memory
+  +--> persist payer, hold, and payment through configured repositories
   +--> complete idempotency record with response
 ```
 
-Because these flows are still in-memory, they are not transactionally durable. Authorization and capture now enforce `Idempotency-Key` locally, but the idempotency record is also in-memory and is lost on restart. PostgreSQL will later make payer balance mutation, hold mutation, payment mutation, idempotency, and outbox event creation part of one transaction.
+In memory mode, these flows remain process-local and are not durable. In Postgres mode, `payment.Service` uses `internal/shared/db.Transactor` so payer balance mutation, payment mutation, and hold mutation share one database transaction through context propagation. HTTP idempotency record start/completion still happens outside the payment service transaction; folding idempotency completion and future outbox writes into the same durable boundary is planned.
 
 ## Current Local Infrastructure
 

@@ -63,6 +63,7 @@ The Go API currently supports the payment foundation:
 - `POST /payments/authorize` route composed through `internal/http/router.go`.
 - `POST /payments/{payment_id}/capture` route composed through `internal/http/router.go`.
 - Runtime repository backend switch through `PAYCORE_REPOSITORY_BACKEND=memory|postgres`.
+- Service-level transaction orchestration through `internal/shared/db.Transactor`.
 - Postgres-backed HTTP smoke test in `cmd/paycore-api/main_test.go`.
 - Entity, hold, repository, service, handler, and router tests.
 
@@ -73,7 +74,7 @@ These are planned but not currently implemented:
 - `GET /payments/{payment_id}`.
 - Redis-backed rate limiting.
 - Redis-backed idempotency response cache.
-- Single PostgreSQL transaction around payer balance, payment, hold, and idempotency writes.
+- Single PostgreSQL transaction that also includes idempotency completion and future outbox writes.
 - Transactional outbox event creation.
 - Kafka event publishing.
 - Authorization expiry worker.
@@ -446,13 +447,15 @@ This adapter is useful for local service development before PostgreSQL exists. I
 
 The current idempotency adapter also stores records in memory. This supports local replay behavior while developing the API contract, but duplicate protection is lost on process restart.
 
-### Current Consistency Limitation
+### Current Transaction Boundary
 
 The authorization and capture services write payer, payment, and hold records through separate repository calls.
 
-That means this local implementation does not provide transactionality. If a later write fails after an earlier write succeeds, partial state is possible.
+In memory mode, `db.NoopTransactor` runs the service callback without durable transactionality. That keeps unit tests and local memory mode simple.
 
-This is acceptable for the current foundation only. PostgreSQL authorization and capture must later run payer balance mutation, payment mutation, hold mutation, idempotency persistence, and outbox event creation in one transaction.
+In Postgres mode, `db.PostgresTransactor` starts one transaction, injects it into `context.Context`, and the Postgres payer/payment repositories execute against that transaction when present. This means payer balance mutation, payment mutation, and hold mutation commit or roll back together for authorization and capture.
+
+HTTP idempotency start/completion currently happens in the handler outside the payment service transaction. A later milestone should move durable idempotency completion and outbox event creation into the same transaction boundary as the business state.
 
 ### PostgreSQL Adapter
 
@@ -466,8 +469,8 @@ Current durable records:
 
 - payments
 - payment holds
-- idempotency records
-- outbox events
+
+Idempotency records are durable in Postgres mode through `internal/idempotency/adapters/postgres/repository.go`, but are not yet completed atomically with payment business state.
 
 ## 8. Tests
 
@@ -507,6 +510,9 @@ Current tests cover:
 - missing hold on capture rejection
 - non-capturable payment rejection
 - expired authorization rejection
+- Postgres transactor commit behavior
+- Postgres transactor rollback behavior
+- nested Postgres transactor reuse behavior
 
 Run:
 
@@ -532,6 +538,7 @@ Defines the payment repository interface and payment/hold repository errors.
 
 Defines payment authorization orchestration across merchant, payer, payment, and hold state.
 It also defines payment capture orchestration across payment, hold, and payer balance state.
+Both flows use `internal/shared/db.Transactor` so Postgres mode can commit or roll back payer, payment, and hold mutations together.
 
 `internal/payment/handler.go`
 
@@ -548,6 +555,14 @@ Provides the current non-durable in-memory payment repository implementation.
 `internal/payment/adapters/postgres/repository.go`
 
 Owns durable PostgreSQL payment and hold persistence.
+
+`internal/shared/db/transactor.go`
+
+Defines the cross-feature `Transactor` interface, context transaction lookup, and no-op memory transactor.
+
+`internal/shared/db/postgres_transactor.go`
+
+Starts, commits, rolls back, and propagates PostgreSQL transactions through `context.Context`.
 
 ## Checklist
 
@@ -566,6 +581,7 @@ Owns durable PostgreSQL payment and hold persistence.
 - [x] Add PostgreSQL payment and hold repository.
 - [x] Wire API runtime to PostgreSQL payment repository.
 - [x] Add Postgres-backed HTTP lifecycle smoke test.
-- [ ] Add transaction boundary around authorization and capture mutations.
-- [ ] Add durable authorization transaction.
+- [x] Add transaction boundary around authorization and capture business mutations.
+- [x] Add durable authorization/capture transaction for payer, payment, and hold writes.
+- [ ] Move durable idempotency completion into the payment transaction boundary.
 - [ ] Add transactional outbox event for `payment.authorized`.

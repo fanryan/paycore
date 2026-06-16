@@ -39,6 +39,7 @@ Current development stage:
 - PostgreSQL repository adapters implemented for merchant, payer, payment, holds, and idempotency records
 - PostgreSQL merchant, payer, payment, hold, and idempotency schema migrations added
 - Runtime repository backend switch implemented with `PAYCORE_REPOSITORY_BACKEND=memory|postgres`
+- Shared transactor added for Postgres transaction propagation through `context.Context`
 - Merchant HTTP create and list endpoints implemented
 - Payer HTTP create and list endpoints implemented
 - Payer balance reservation, release, and held-capture behavior implemented
@@ -74,7 +75,7 @@ POST /payments/{payment_id}/capture
 
 Runtime wiring to PostgreSQL repositories is available through `PAYCORE_REPOSITORY_BACKEND=postgres`. Memory repositories remain the default. Redis, Kafka, Prometheus, settlement processing, and outbox publishing have not been implemented yet.
 
-Payment authorization and capture enforce `Idempotency-Key`. In memory mode, idempotency records are process-local. In Postgres mode, merchant, payer, payment, hold, and idempotency records use PostgreSQL repositories.
+Payment authorization and capture enforce `Idempotency-Key`. In memory mode, idempotency records are process-local. In Postgres mode, merchant, payer, payment, hold, and idempotency records use PostgreSQL repositories. Payment authorization and capture business mutations run through a service-level transaction boundary in Postgres mode.
 
 ## Run Locally
 
@@ -256,6 +257,10 @@ paycore/
       currency/
         currency.go
         currency_test.go
+      db/
+        postgres_transactor.go
+        postgres_transactor_test.go
+        transactor.go
       httpjson/
         response.go
       id/

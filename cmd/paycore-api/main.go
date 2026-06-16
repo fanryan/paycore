@@ -24,6 +24,7 @@ import (
 	paymentmemory "github.com/fanryan/paycore/internal/payment/adapters/memory"
 	paymentpostgres "github.com/fanryan/paycore/internal/payment/adapters/postgres"
 	"github.com/fanryan/paycore/internal/shared/config"
+	"github.com/fanryan/paycore/internal/shared/db"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -37,6 +38,7 @@ type repositories struct {
 	payers      payer.PayerRepository
 	payments    payment.Repository
 	idempotency idempotency.Repository
+	transactor  db.Transactor
 	close       func()
 }
 
@@ -57,7 +59,12 @@ func main() {
 	payerService := payer.NewPayerService(repositories.payers)
 	payerHandler := payer.NewHandler(payerService)
 
-	paymentService := payment.NewService(repositories.merchants, repositories.payers, repositories.payments)
+	paymentService := payment.NewServiceWithTransactor(
+		repositories.merchants,
+		repositories.payers,
+		repositories.payments,
+		repositories.transactor,
+	)
 	idempotencyService := idempotency.NewService(repositories.idempotency, 24*time.Hour)
 	paymentHandler := payment.NewHandlerWithIdempotency(paymentService, idempotencyService)
 
@@ -126,6 +133,7 @@ func newMemoryRepositories() repositories {
 		payers:      payermemory.NewStore(),
 		payments:    paymentmemory.NewStore(),
 		idempotency: idempotencymemory.NewStore(),
+		transactor:  db.NoopTransactor{},
 		close:       func() {},
 	}
 }
@@ -150,6 +158,7 @@ func newPostgresRepositories(ctx context.Context, databaseURL string) (repositor
 		payers:      payerpostgres.NewStore(pool),
 		payments:    paymentpostgres.NewStore(pool),
 		idempotency: idempotencypostgres.NewStore(pool),
+		transactor:  db.NewPostgresTransactor(pool),
 		close:       pool.Close,
 	}, nil
 }
