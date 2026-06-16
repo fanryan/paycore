@@ -14,6 +14,7 @@ The Go API currently supports the payment foundation:
 - Payment authorization service in `internal/payment/service.go`.
 - Payment capture service in `internal/payment/service.go`.
 - In-memory payment repository adapter in `internal/payment/adapters/memory/repository.go`.
+- PostgreSQL payment and hold repository adapter in `internal/payment/adapters/postgres/repository.go`.
 - Payment statuses:
   - `PENDING`
   - `AUTHORIZED`
@@ -71,7 +72,7 @@ These are planned but not currently implemented:
 - Redis-backed rate limiting.
 - Redis-backed idempotency response cache.
 - Durable PostgreSQL idempotency records.
-- PostgreSQL payment repository.
+- Runtime wiring from the API to the PostgreSQL payment repository.
 - PostgreSQL payer balance transaction.
 - Transactional outbox event creation.
 - Kafka event publishing.
@@ -559,5 +560,7 @@ Planned. Will own durable PostgreSQL payment and hold persistence.
 - [x] Add local idempotency-key enforcement for capture.
 - [ ] Add Redis-backed rate limiting.
 - [x] Add PostgreSQL payment and hold migrations.
+- [x] Add PostgreSQL payment and hold repository.
+- [ ] Wire API runtime to PostgreSQL payment repository.
 - [ ] Add durable authorization transaction.
 - [ ] Add transactional outbox event for `payment.authorized`.

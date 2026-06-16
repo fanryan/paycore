@@ -33,7 +33,7 @@ These are planned but not currently implemented:
 - Automatic migration execution in app startup.
 - Settlement migrations.
 - Outbox migrations.
-- PostgreSQL repository adapters.
+- Runtime wiring from the API to PostgreSQL repository adapters.
 - Integration tests against local PostgreSQL.
 
 ## 2. Migration Files
@@ -221,4 +221,5 @@ Run the command repeatedly as needed. Already-applied migrations are skipped.
 - [x] Add migration runner.
 - [ ] Add settlement migration.
 - [ ] Add outbox migration.
-- [ ] Add PostgreSQL repository adapters.
+- [x] Add PostgreSQL repository adapters.
+- [ ] Wire API runtime to PostgreSQL repository adapters.

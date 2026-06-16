@@ -12,6 +12,7 @@ The Go API currently supports a local idempotency foundation:
 - Idempotency repository interface in `internal/idempotency/repository.go`.
 - Idempotency service in `internal/idempotency/service.go`.
 - In-memory idempotency repository adapter in `internal/idempotency/adapters/memory/repository.go`.
+- PostgreSQL idempotency repository adapter in `internal/idempotency/adapters/postgres/repository.go`.
 - Request hashing with SHA-256 over HTTP method, URL path, and request body.
 - Idempotency statuses:
   - `IN_PROGRESS`
@@ -33,6 +34,7 @@ The Go API currently supports a local idempotency foundation:
 These are planned but not currently implemented:
 
 - PostgreSQL durable idempotency records.
+- Runtime wiring from the API to the PostgreSQL idempotency repository.
 - Redis idempotency response cache.
 - Request hash canonicalization beyond raw request body hashing.
 - Durable recovery for `IN_PROGRESS` records after process crash.
@@ -331,6 +333,7 @@ Captures response status and body for payment authorization and capture replay.
 - [x] Reject same key and different request hash.
 - [x] Enforce `Idempotency-Key` on payment capture.
 - [x] Add PostgreSQL idempotency record migration.
-- [ ] Add PostgreSQL durable idempotency records.
+- [x] Add PostgreSQL durable idempotency repository.
+- [ ] Wire API runtime to PostgreSQL idempotency repository.
 - [ ] Add Redis idempotency response cache.
 - [ ] Add idempotency metrics.

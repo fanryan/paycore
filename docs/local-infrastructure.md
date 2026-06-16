@@ -29,7 +29,7 @@ These are planned but not currently implemented:
 - Application runtime connection to PostgreSQL.
 - Application runtime connection to Redis.
 - PostgreSQL payment, idempotency, settlement, and outbox migrations.
-- PostgreSQL repository adapters.
+- Runtime wiring from the API to PostgreSQL repository adapters.
 - Redis rate limiter.
 - Redis idempotency response cache.
 - Kafka broker.
@@ -136,7 +136,7 @@ Existing tests use in-memory repositories and can run with:
 go test ./...
 ```
 
-PostgreSQL and Redis integration tests are planned once the runtime adapters exist.
+PostgreSQL repository adapter tests run against local PostgreSQL when `PAYCORE_DATABASE_URL` is set. Redis integration tests are planned once Redis-backed adapters exist.
 
 Schema migrations are plain SQL and are applied by the local `paycore-migrate` command.
 
@@ -176,7 +176,8 @@ Applies local PostgreSQL migrations and records applied files in `schema_migrati
 - [x] Add PostgreSQL merchant and payer migrations.
 - [x] Add PostgreSQL payment and idempotency migrations.
 - [x] Add migration runner.
-- [ ] Add PostgreSQL repository adapters.
+- [x] Add PostgreSQL repository adapters.
+- [ ] Wire API runtime to PostgreSQL repository adapters.
 - [ ] Add Redis rate limiter.
 - [ ] Add Redis idempotency response cache.
 - [ ] Add Kafka service.

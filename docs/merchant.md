@@ -13,6 +13,7 @@ The Go API currently supports the merchant foundation:
 - Merchant service in `internal/merchant/service.go`.
 - Merchant HTTP handler in `internal/merchant/handler.go`.
 - In-memory merchant repository adapter in `internal/merchant/adapters/memory/repository.go`.
+- PostgreSQL merchant repository adapter in `internal/merchant/adapters/postgres/repository.go`.
 - PostgreSQL merchant table migration in `migrations/000001_create_merchants.sql`.
 - Merchant statuses:
   - `ACTIVE`
@@ -32,7 +33,7 @@ The Go API currently supports the merchant foundation:
 
 These are planned but not currently implemented:
 
-- PostgreSQL merchant repository.
+- Runtime wiring from the API to the PostgreSQL merchant repository.
 - Merchant authentication and authorization rules.
 - Merchant status update endpoints.
 - Merchant rate-limit tiers.
@@ -311,5 +312,6 @@ Planned. Will own durable PostgreSQL merchant persistence.
 - [x] Register merchant routes in `internal/http/router.go`.
 - [x] Add merchant handler tests.
 - [x] Add PostgreSQL migration for merchants.
-- [ ] Add PostgreSQL merchant repository.
+- [x] Add PostgreSQL merchant repository.
+- [ ] Wire API runtime to PostgreSQL merchant repository.
 - [ ] Document final merchant request and response contracts.

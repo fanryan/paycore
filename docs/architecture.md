@@ -56,7 +56,7 @@ Current supported configuration:
 | `PAYCORE_HTTP_ADDR` | `:8080` | HTTP listen address |
 | `PAYCORE_HTTP_READ_HEADER_TIMEOUT_SECONDS` | `5` | HTTP read header timeout in seconds |
 | `PAYCORE_HTTP_SHUTDOWN_TIMEOUT_SECONDS` | `10` | Graceful shutdown timeout in seconds |
-| `PAYCORE_DATABASE_URL` | empty | PostgreSQL connection string loaded for upcoming repository adapters |
+| `PAYCORE_DATABASE_URL` | empty | PostgreSQL connection string for migrations and repository adapters |
 | `PAYCORE_REDIS_ADDR` | `localhost:6379` | Redis address loaded for upcoming rate limiting and cache adapters |
 
 ## High-Level Flow
@@ -223,6 +223,6 @@ paycore-postgres
 paycore-redis
 ```
 
-These services are not connected to the API yet. They exist to support the upcoming PostgreSQL repository adapters, durable idempotency records, Redis rate limiting, and Redis idempotency response caching.
+These services are not connected to the API runtime yet. PostgreSQL repository adapters exist for merchant, payer, payment, holds, and idempotency records, but `cmd/paycore-api` still wires in-memory repositories. Redis rate limiting and Redis idempotency response caching are still planned.
 
 The repository also includes initial plain SQL migrations for merchant, payer, payment, hold, and idempotency tables. They can be applied locally with `go run ./cmd/paycore-migrate`.

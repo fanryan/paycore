@@ -13,6 +13,7 @@ The Go API currently supports the payer foundation:
 - Payer service in `internal/payer/service.go`.
 - Payer HTTP handler in `internal/payer/handler.go`.
 - In-memory payer repository adapter in `internal/payer/adapters/memory/repository.go`.
+- PostgreSQL payer repository adapter in `internal/payer/adapters/postgres/repository.go`.
 - PostgreSQL payer table migration in `migrations/000002_create_payers.sql`.
 - Available balance stored as integer minor units.
 - Held balance stored as integer minor units.
@@ -31,7 +32,7 @@ The Go API currently supports the payer foundation:
 
 These are planned but not currently implemented:
 
-- PostgreSQL payer repository.
+- Runtime wiring from the API to the PostgreSQL payer repository.
 - Optimistic concurrency enforcement in durable persistence.
 - Balance hold mutation methods.
 - Authorization hold creation.
@@ -345,6 +346,7 @@ Planned. Will own durable PostgreSQL payer persistence and optimistic concurrenc
 - [x] Register payer routes in `internal/http/router.go`.
 - [x] Add payer handler tests.
 - [x] Add PostgreSQL migration for payers.
-- [ ] Add PostgreSQL payer repository.
+- [x] Add PostgreSQL payer repository.
+- [ ] Wire API runtime to PostgreSQL payer repository.
 - [ ] Implement durable optimistic concurrency for balance mutation.
 - [ ] Document final payer request and response contracts.

@@ -36,6 +36,7 @@ Current development stage:
 - Feature-first package layout introduced for merchant and payer modules
 - Merchant entity, service, repository interface, and in-memory adapter implemented
 - Payer entity, service, repository interface, and in-memory adapter implemented
+- PostgreSQL repository adapters implemented for merchant, payer, payment, holds, and idempotency records
 - PostgreSQL merchant, payer, payment, hold, and idempotency schema migrations added
 - Merchant HTTP create and list endpoints implemented
 - Payer HTTP create and list endpoints implemented
@@ -69,7 +70,7 @@ POST /payments/authorize
 POST /payments/{payment_id}/capture
 ```
 
-Runtime integration with PostgreSQL, Redis, Kafka, Prometheus, settlement processing, and outbox publishing has not been implemented yet. Docker Compose currently starts local PostgreSQL and Redis for upcoming persistence and cache work.
+Runtime wiring to PostgreSQL, Redis, Kafka, Prometheus, settlement processing, and outbox publishing has not been implemented yet. Docker Compose currently starts local PostgreSQL and Redis. PostgreSQL repository adapters exist, but the API still uses in-memory repositories at runtime.
 
 Payment authorization and capture are currently local and in-memory. They enforce `Idempotency-Key` through an in-memory repository, but do not yet use durable PostgreSQL idempotency records, Redis response caching, Redis rate limiting, durable PostgreSQL payment transactions, or outbox event creation.
 
@@ -117,7 +118,7 @@ Supported local configuration:
 | `PAYCORE_HTTP_ADDR` | `:8080` | HTTP listen address |
 | `PAYCORE_HTTP_READ_HEADER_TIMEOUT_SECONDS` | `5` | HTTP read header timeout in seconds |
 | `PAYCORE_HTTP_SHUTDOWN_TIMEOUT_SECONDS` | `10` | Graceful shutdown timeout in seconds |
-| `PAYCORE_DATABASE_URL` | empty | PostgreSQL connection string loaded for upcoming repository adapters |
+| `PAYCORE_DATABASE_URL` | empty | PostgreSQL connection string for migrations and repository adapters |
 | `PAYCORE_REDIS_ADDR` | `localhost:6379` | Redis address loaded for upcoming rate limiting and cache adapters |
 
 Test the current endpoints:
@@ -167,6 +168,8 @@ paycore/
   cmd/
     paycore-api/
       main.go
+    paycore-migrate/
+      main.go
   internal/
     idempotency/
       record.go
@@ -176,6 +179,9 @@ paycore/
       service_test.go
       adapters/
         memory/
+          repository.go
+          repository_test.go
+        postgres/
           repository.go
           repository_test.go
     http/
@@ -191,6 +197,9 @@ paycore/
       adapters/
         memory/
           repository.go
+        postgres/
+          repository.go
+          repository_test.go
     payer/
       entity.go
       handler.go
@@ -199,6 +208,9 @@ paycore/
       adapters/
         memory/
           repository.go
+        postgres/
+          repository.go
+          repository_test.go
     payment/
       entity.go
       entity_test.go
@@ -212,6 +224,9 @@ paycore/
       service_test.go
       adapters/
         memory/
+          repository.go
+          repository_test.go
+        postgres/
           repository.go
           repository_test.go
     shared/
