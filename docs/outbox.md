@@ -18,12 +18,14 @@ This document explains the current PayCore transactional outbox foundation as it
 - PostgreSQL claiming uses `FOR UPDATE SKIP LOCKED`.
 - Claimed events can be marked `PUBLISHED`.
 - Claimed events can be marked `FAILED` with a future retry availability time.
+- Outbox worker skeleton in `internal/outbox/worker.go`.
+- Publisher interface in `internal/outbox/publisher.go`.
 - API Postgres smoke test verifies both payment lifecycle and outbox event rows.
 
 ### Not Implemented Yet
 
-- Outbox publisher worker.
 - Retry backoff policy.
+- Runtime worker command or process.
 - Kafka publishing.
 - Dead-letter handling.
 - LedgerFlow consumer integration.
@@ -171,6 +173,50 @@ commit claim
 
 If the claim transaction rolls back, claimed rows return to their previous state because the status/attempt/lock updates were never committed.
 
+## 5. Worker Flow
+
+### Service Input
+
+The worker owns publisher orchestration but does not know Kafka yet. It depends on a small publisher interface:
+
+```go
+type Publisher interface {
+    Publish(ctx context.Context, event Event) error
+}
+```
+
+### Step-by-Step
+
+1. `Worker.ProcessBatch` claims events inside `Transactor.WithinTx`.
+2. For each claimed event, the worker calls `Publisher.Publish`.
+3. If publish succeeds, the worker marks the event `PUBLISHED`.
+4. If publish fails, the worker marks the event `FAILED` and schedules retry after a short delay.
+5. The result reports claimed, published, and failed counts.
+
+### Diagram
+
+```text
+Outbox Worker
+  |
+  +--> claim batch in transaction
+  |
+  +--> Publisher.Publish(event)
+  |       |
+  |       +--> success -> MarkEventPublished
+  |       +--> failure -> MarkEventFailed
+  |
+  v
+ProcessBatchResult
+```
+
+### Failure Path
+
+If claiming fails, `ProcessBatch` returns the claim error and publishes nothing.
+
+If publishing fails for one event, that event is marked failed and the worker continues with the rest of the batch.
+
+If marking published or failed fails, `ProcessBatch` returns that repository error.
+
 ## Validation And Errors
 
 `outbox.NewEvent` validates:
@@ -185,6 +231,9 @@ Repository errors:
 ```text
 ErrDuplicateEvent
 ErrEventNotFound
+ErrRepositoryRequired
+ErrPublisherRequired
+ErrTransactorRequired
 ```
 
 `ErrEventNotFound` is returned when a publisher tries to mark a missing event or an event that is not currently `IN_PROGRESS`.
@@ -234,6 +283,10 @@ Current tests cover:
 - PostgreSQL outbox claim ordering
 - PostgreSQL outbox claim rollback
 - PostgreSQL outbox publish/fail transitions
+- worker successful publish flow
+- worker failed publish retry flow
+- worker empty batch behavior
+- worker dependency validation
 - payment authorization outbox event creation
 - payment capture outbox event creation
 - API Postgres smoke coverage for outbox rows
@@ -253,6 +306,14 @@ Defines event status constants, event fields, and `NewEvent`.
 `internal/outbox/repository.go`
 
 Defines `Repository`, `NoopRepository`, claim inputs, mark-failed inputs, and repository errors.
+
+`internal/outbox/publisher.go`
+
+Defines the publisher interface used by the worker. Kafka will be an adapter for this interface later.
+
+`internal/outbox/worker.go`
+
+Claims events, calls the publisher interface, and marks events published or failed.
 
 `internal/outbox/adapters/memory/repository.go`
 
@@ -276,6 +337,7 @@ Creates the durable outbox table and indexes.
 - [x] Emit `payment.authorized`.
 - [x] Emit `payment.captured`.
 - [x] Add claim/retry repository methods.
-- [ ] Add outbox publisher worker.
+- [x] Add outbox publisher worker skeleton.
+- [ ] Add runtime worker command or process.
 - [ ] Publish events to Kafka.
 - [ ] Add LedgerFlow integration notes.
