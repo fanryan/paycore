@@ -15,6 +15,9 @@ func TestLoadUsesDefaults(t *testing.T) {
 	t.Setenv("PAYCORE_KAFKA_BROKERS", "")
 	t.Setenv("PAYCORE_KAFKA_OUTBOX_TOPIC", "")
 	t.Setenv("PAYCORE_OUTBOX_PUBLISHER", "")
+	t.Setenv("PAYCORE_RATE_LIMIT_ENABLED", "")
+	t.Setenv("PAYCORE_RATE_LIMIT_REQUESTS", "")
+	t.Setenv("PAYCORE_RATE_LIMIT_WINDOW_SECONDS", "")
 	t.Setenv("PAYCORE_REPOSITORY_BACKEND", "")
 
 	cfg := Load()
@@ -55,6 +58,18 @@ func TestLoadUsesDefaults(t *testing.T) {
 		t.Fatalf("expected outbox publisher logging, got %q", cfg.OutboxPublisher)
 	}
 
+	if cfg.RateLimitEnabled {
+		t.Fatal("expected rate limit disabled by default")
+	}
+
+	if cfg.RateLimitRequests != 60 {
+		t.Fatalf("expected rate limit requests 60, got %d", cfg.RateLimitRequests)
+	}
+
+	if cfg.RateLimitWindow != time.Minute {
+		t.Fatalf("expected rate limit window 1m, got %s", cfg.RateLimitWindow)
+	}
+
 	if cfg.RepositoryBackend != "memory" {
 		t.Fatalf("expected repository backend memory, got %q", cfg.RepositoryBackend)
 	}
@@ -70,6 +85,9 @@ func TestLoadUsesEnvironmentOverrides(t *testing.T) {
 	t.Setenv("PAYCORE_KAFKA_BROKERS", "kafka:9092")
 	t.Setenv("PAYCORE_KAFKA_OUTBOX_TOPIC", "paycore.payment.events")
 	t.Setenv("PAYCORE_OUTBOX_PUBLISHER", "kafka")
+	t.Setenv("PAYCORE_RATE_LIMIT_ENABLED", "true")
+	t.Setenv("PAYCORE_RATE_LIMIT_REQUESTS", "42")
+	t.Setenv("PAYCORE_RATE_LIMIT_WINDOW_SECONDS", "30")
 	t.Setenv("PAYCORE_REPOSITORY_BACKEND", "postgres")
 
 	cfg := Load()
@@ -110,6 +128,18 @@ func TestLoadUsesEnvironmentOverrides(t *testing.T) {
 		t.Fatalf("expected outbox publisher kafka, got %q", cfg.OutboxPublisher)
 	}
 
+	if !cfg.RateLimitEnabled {
+		t.Fatal("expected rate limit enabled")
+	}
+
+	if cfg.RateLimitRequests != 42 {
+		t.Fatalf("expected rate limit requests 42, got %d", cfg.RateLimitRequests)
+	}
+
+	if cfg.RateLimitWindow != 30*time.Second {
+		t.Fatalf("expected rate limit window 30s, got %s", cfg.RateLimitWindow)
+	}
+
 	if cfg.RepositoryBackend != "postgres" {
 		t.Fatalf("expected repository backend postgres, got %q", cfg.RepositoryBackend)
 	}
@@ -118,6 +148,7 @@ func TestLoadUsesEnvironmentOverrides(t *testing.T) {
 func TestLoadFallsBackForInvalidDurations(t *testing.T) {
 	t.Setenv("PAYCORE_HTTP_READ_HEADER_TIMEOUT_SECONDS", "not-a-number")
 	t.Setenv("PAYCORE_HTTP_SHUTDOWN_TIMEOUT_SECONDS", "-1")
+	t.Setenv("PAYCORE_RATE_LIMIT_WINDOW_SECONDS", "0")
 
 	cfg := Load()
 
@@ -127,5 +158,24 @@ func TestLoadFallsBackForInvalidDurations(t *testing.T) {
 
 	if cfg.HTTPShutdownTimeout != 10*time.Second {
 		t.Fatalf("expected shutdown timeout fallback 10s, got %s", cfg.HTTPShutdownTimeout)
+	}
+
+	if cfg.RateLimitWindow != time.Minute {
+		t.Fatalf("expected rate limit window fallback 1m, got %s", cfg.RateLimitWindow)
+	}
+}
+
+func TestLoadFallsBackForInvalidBoolAndInt64Values(t *testing.T) {
+	t.Setenv("PAYCORE_RATE_LIMIT_ENABLED", "not-a-bool")
+	t.Setenv("PAYCORE_RATE_LIMIT_REQUESTS", "-1")
+
+	cfg := Load()
+
+	if cfg.RateLimitEnabled {
+		t.Fatal("expected rate limit enabled fallback false")
+	}
+
+	if cfg.RateLimitRequests != 60 {
+		t.Fatalf("expected rate limit requests fallback 60, got %d", cfg.RateLimitRequests)
 	}
 }

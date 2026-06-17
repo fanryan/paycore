@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/fanryan/paycore/internal/ratelimit"
 	"github.com/fanryan/paycore/internal/shared/httpjson"
 	"github.com/go-chi/chi/v5"
 )
@@ -17,6 +18,7 @@ type RouterConfig struct {
 	MerchantHandler http.Handler
 	PayerHandler    http.Handler
 	PaymentHandler  http.Handler
+	RateLimiter     ratelimit.Limiter
 }
 
 type ErrorResponse struct {
@@ -47,6 +49,10 @@ func NewRouter(config RouterConfig) http.Handler {
 
 	if config.PaymentHandler != nil {
 		router.Route("/payments", func(r chi.Router) {
+			if config.RateLimiter != nil {
+				r.Use(rateLimitMiddleware(config.RateLimiter))
+			}
+
 			r.Post("/authorize", config.PaymentHandler.ServeHTTP)
 			r.Post("/{payment_id}/capture", config.PaymentHandler.ServeHTTP)
 		})

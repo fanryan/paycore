@@ -26,9 +26,12 @@ import (
 	"github.com/fanryan/paycore/internal/payment"
 	paymentmemory "github.com/fanryan/paycore/internal/payment/adapters/memory"
 	paymentpostgres "github.com/fanryan/paycore/internal/payment/adapters/postgres"
+	"github.com/fanryan/paycore/internal/ratelimit"
+	ratelimitredis "github.com/fanryan/paycore/internal/ratelimit/adapters/redis"
 	"github.com/fanryan/paycore/internal/shared/config"
 	"github.com/fanryan/paycore/internal/shared/db"
 	"github.com/jackc/pgx/v5/pgxpool"
+	goredis "github.com/redis/go-redis/v9"
 )
 
 const (
@@ -57,6 +60,13 @@ func main() {
 	}
 	defer repositories.close()
 
+	rateLimiter, closeRateLimiter, err := newRateLimiter(context.Background(), cfg)
+	if err != nil {
+		logger.Error("failed to initialize rate limiter", "error", err)
+		os.Exit(1)
+	}
+	defer closeRateLimiter()
+
 	merchantService := merchant.NewMerchantService(repositories.merchants)
 	merchantHandler := merchant.NewHandler(merchantService)
 
@@ -83,6 +93,7 @@ func main() {
 			MerchantHandler: merchantHandler,
 			PayerHandler:    payerHandler,
 			PaymentHandler:  paymentHandler,
+			RateLimiter:     rateLimiter,
 		}),
 		ReadHeaderTimeout: cfg.HTTPReadHeaderTimeout,
 	}
@@ -98,6 +109,7 @@ func main() {
 			"repository_backend", cfg.RepositoryBackend,
 			"read_header_timeout", cfg.HTTPReadHeaderTimeout.String(),
 			"shutdown_timeout", cfg.HTTPShutdownTimeout.String(),
+			"rate_limit_enabled", cfg.RateLimitEnabled,
 		)
 
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -167,5 +179,34 @@ func newPostgresRepositories(ctx context.Context, databaseURL string) (repositor
 		outbox:      outboxpostgres.NewStore(pool),
 		transactor:  db.NewPostgresTransactor(pool),
 		close:       pool.Close,
+	}, nil
+}
+
+func newRateLimiter(ctx context.Context, cfg config.Config) (ratelimit.Limiter, func(), error) {
+	if !cfg.RateLimitEnabled {
+		return nil, func() {}, nil
+	}
+
+	client := goredis.NewClient(&goredis.Options{
+		Addr: cfg.RedisAddr,
+	})
+
+	if err := client.Ping(ctx).Err(); err != nil {
+		_ = client.Close()
+		return nil, nil, fmt.Errorf("ping redis: %w", err)
+	}
+
+	limiter, err := ratelimitredis.NewLimiter(ratelimitredis.Config{
+		Client: client,
+		Limit:  cfg.RateLimitRequests,
+		Window: cfg.RateLimitWindow,
+	})
+	if err != nil {
+		_ = client.Close()
+		return nil, nil, err
+	}
+
+	return limiter, func() {
+		_ = client.Close()
 	}, nil
 }

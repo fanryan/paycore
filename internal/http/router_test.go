@@ -2,6 +2,7 @@ package http
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 	payermemory "github.com/fanryan/paycore/internal/payer/adapters/memory"
 	"github.com/fanryan/paycore/internal/payment"
 	paymentmemory "github.com/fanryan/paycore/internal/payment/adapters/memory"
+	"github.com/fanryan/paycore/internal/ratelimit"
 )
 
 func TestHealthEndpoint(t *testing.T) {
@@ -462,6 +464,118 @@ func TestPaymentAuthorizeRouteUsesIdempotencyWhenConfigured(t *testing.T) {
 	}
 }
 
+func TestPaymentRoutesUseRateLimiterWhenConfigured(t *testing.T) {
+	limiter := &fakeRateLimiter{
+		result: ratelimit.Result{
+			Allowed:   true,
+			Limit:     2,
+			Remaining: 1,
+		},
+	}
+
+	router := NewRouter(RouterConfig{
+		ServiceName: "paycore-api",
+		Version:     "test",
+		StartedAt:   time.Date(2026, 6, 6, 12, 0, 0, 0, time.UTC),
+		Logger:      slog.Default(),
+		PaymentHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusCreated)
+		}),
+		RateLimiter: limiter,
+	})
+
+	request := httptest.NewRequest(http.MethodPost, "/payments/authorize", nil)
+	request.Header.Set("X-Forwarded-For", "203.0.113.10, 10.0.0.1")
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d", http.StatusCreated, response.Code)
+	}
+
+	if limiter.key != "203.0.113.10" {
+		t.Fatalf("expected limiter key 203.0.113.10, got %q", limiter.key)
+	}
+
+	if response.Header().Get("RateLimit-Limit") != "2" {
+		t.Fatalf("expected RateLimit-Limit 2, got %q", response.Header().Get("RateLimit-Limit"))
+	}
+
+	if response.Header().Get("RateLimit-Remaining") != "1" {
+		t.Fatalf("expected RateLimit-Remaining 1, got %q", response.Header().Get("RateLimit-Remaining"))
+	}
+}
+
+func TestPaymentRoutesReturnTooManyRequestsWhenRateLimitExceeded(t *testing.T) {
+	router := NewRouter(RouterConfig{
+		ServiceName: "paycore-api",
+		Version:     "test",
+		StartedAt:   time.Date(2026, 6, 6, 12, 0, 0, 0, time.UTC),
+		Logger:      slog.Default(),
+		PaymentHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			t.Fatal("payment handler should not be called")
+		}),
+		RateLimiter: &fakeRateLimiter{
+			result: ratelimit.Result{
+				Allowed:    false,
+				Limit:      2,
+				Remaining:  0,
+				RetryAfter: 30 * time.Second,
+			},
+		},
+	})
+
+	request := httptest.NewRequest(http.MethodPost, "/payments/authorize", nil)
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected status %d, got %d", http.StatusTooManyRequests, response.Code)
+	}
+
+	if response.Header().Get("Retry-After") != "30" {
+		t.Fatalf("expected Retry-After 30, got %q", response.Header().Get("Retry-After"))
+	}
+
+	var body ErrorResponse
+	decodeJSON(t, response, &body)
+	if body.ErrorCode != "RATE_LIMIT_EXCEEDED" {
+		t.Fatalf("expected RATE_LIMIT_EXCEEDED, got %q", body.ErrorCode)
+	}
+}
+
+func TestPaymentRoutesFailClosedWhenRateLimiterUnavailable(t *testing.T) {
+	router := NewRouter(RouterConfig{
+		ServiceName: "paycore-api",
+		Version:     "test",
+		StartedAt:   time.Date(2026, 6, 6, 12, 0, 0, 0, time.UTC),
+		Logger:      slog.Default(),
+		PaymentHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			t.Fatal("payment handler should not be called")
+		}),
+		RateLimiter: &fakeRateLimiter{
+			err: ratelimit.ErrLimiterUnavailable,
+		},
+	})
+
+	request := httptest.NewRequest(http.MethodPost, "/payments/authorize", nil)
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected status %d, got %d", http.StatusServiceUnavailable, response.Code)
+	}
+
+	var body ErrorResponse
+	decodeJSON(t, response, &body)
+	if body.ErrorCode != "RATE_LIMITER_UNAVAILABLE" {
+		t.Fatalf("expected RATE_LIMITER_UNAVAILABLE, got %q", body.ErrorCode)
+	}
+}
+
 func newTestRouter() http.Handler {
 	return NewRouter(RouterConfig{
 		ServiceName: "paycore-api",
@@ -477,6 +591,17 @@ func decodeJSON(t *testing.T, response *httptest.ResponseRecorder, target any) {
 	if err := json.NewDecoder(response.Body).Decode(target); err != nil {
 		t.Fatalf("failed to decode JSON response: %v", err)
 	}
+}
+
+type fakeRateLimiter struct {
+	result ratelimit.Result
+	err    error
+	key    string
+}
+
+func (l *fakeRateLimiter) Allow(ctx context.Context, key string) (ratelimit.Result, error) {
+	l.key = key
+	return l.result, l.err
 }
 
 func assertJSONContentType(t *testing.T, response *httptest.ResponseRecorder) {

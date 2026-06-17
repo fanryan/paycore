@@ -4,9 +4,14 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
+
+	"github.com/fanryan/paycore/internal/ratelimit"
 )
 
 type contextKey string
@@ -117,6 +122,39 @@ func loggingMiddleware(logger *slog.Logger) func(http.Handler) http.Handler {
 	}
 }
 
+func rateLimitMiddleware(limiter ratelimit.Limiter) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			result, err := limiter.Allow(r.Context(), rateLimitKey(r))
+			if err != nil {
+				if errors.Is(err, ratelimit.ErrLimiterUnavailable) {
+					writeError(w, r, http.StatusServiceUnavailable, "RATE_LIMITER_UNAVAILABLE", "Rate limiter unavailable")
+					return
+				}
+
+				writeError(w, r, http.StatusInternalServerError, "RATE_LIMIT_ERROR", "Rate limit check failed")
+				return
+			}
+
+			if result.Limit > 0 {
+				w.Header().Set("RateLimit-Limit", strconv.FormatInt(result.Limit, 10))
+				w.Header().Set("RateLimit-Remaining", strconv.FormatInt(result.Remaining, 10))
+			}
+
+			if !result.Allowed {
+				if result.RetryAfter > 0 {
+					w.Header().Set("Retry-After", strconv.FormatInt(int64(result.RetryAfter.Seconds()), 10))
+				}
+
+				writeError(w, r, http.StatusTooManyRequests, "RATE_LIMIT_EXCEEDED", "Rate limit exceeded")
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 func requestIDFromContext(ctx context.Context) string {
 	requestID, ok := ctx.Value(requestIDContextKey).(string)
 	if !ok || requestID == "" {
@@ -124,6 +162,29 @@ func requestIDFromContext(ctx context.Context) string {
 	}
 
 	return requestID
+}
+
+func rateLimitKey(r *http.Request) string {
+	forwardedFor := r.Header.Get("X-Forwarded-For")
+	if forwardedFor != "" {
+		parts := strings.Split(forwardedFor, ",")
+		candidate := strings.TrimSpace(parts[0])
+		if candidate != "" {
+			return candidate
+		}
+	}
+
+	realIP := strings.TrimSpace(r.Header.Get("X-Real-IP"))
+	if realIP != "" {
+		return realIP
+	}
+
+	remoteAddr := strings.TrimSpace(r.RemoteAddr)
+	if remoteAddr != "" {
+		return remoteAddr
+	}
+
+	return "unknown"
 }
 
 func newRequestID() string {

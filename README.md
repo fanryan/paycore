@@ -50,6 +50,7 @@ Current development stage:
 - In-memory idempotency record, service, repository interface, and memory adapter implemented
 - Payment authorization HTTP endpoint implemented with local in-memory `Idempotency-Key` enforcement
 - Payment capture service and HTTP endpoint implemented with local in-memory `Idempotency-Key` enforcement
+- Redis-backed fixed-window rate limiting implemented for payment mutation routes
 - Shared currency normalization and validation implemented
 - Shared random id helper implemented
 - Central HTTP router migrated to chi for path parameters and feature route composition
@@ -76,9 +77,9 @@ POST /payments/authorize
 POST /payments/{payment_id}/capture
 ```
 
-Runtime wiring to PostgreSQL repositories is available through `PAYCORE_REPOSITORY_BACKEND=postgres`. Memory repositories remain the default. Redis, Kafka, Prometheus, settlement processing, and Kafka-backed outbox publishing have not been implemented yet.
+Runtime wiring to PostgreSQL repositories is available through `PAYCORE_REPOSITORY_BACKEND=postgres`. Memory repositories remain the default. Redis-backed rate limiting and Kafka-backed outbox publishing are implemented but opt-in. Prometheus and settlement processing have not been implemented yet.
 
-Payment authorization and capture enforce `Idempotency-Key`. In memory mode, idempotency records are process-local. In Postgres mode, merchant, payer, payment, hold, idempotency, and outbox records use PostgreSQL repositories. Payment authorization and capture business mutations plus outbox event creation run through a service-level transaction boundary in Postgres mode.
+Payment authorization and capture enforce `Idempotency-Key`. In memory mode, idempotency records are process-local. In Postgres mode, merchant, payer, payment, hold, idempotency, and outbox records use PostgreSQL repositories. Payment authorization and capture business mutations plus outbox event creation run through a service-level transaction boundary in Postgres mode. Redis-backed rate limiting fails closed if Redis is unavailable.
 
 ## Run Locally
 
@@ -114,6 +115,15 @@ Start the API server with PostgreSQL repositories:
 ```bash
 PAYCORE_REPOSITORY_BACKEND=postgres \
 PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=disable' \
+go run ./cmd/paycore-api
+```
+
+Start the API server with Redis rate limiting enabled:
+
+```bash
+docker compose up -d redis
+PAYCORE_RATE_LIMIT_ENABLED=true \
+PAYCORE_REDIS_ADDR=localhost:6379 \
 go run ./cmd/paycore-api
 ```
 
@@ -158,6 +168,9 @@ Supported local configuration:
 | `PAYCORE_KAFKA_BROKERS` | `localhost:9092` | Kafka broker list loaded for upcoming outbox publisher adapter |
 | `PAYCORE_KAFKA_OUTBOX_TOPIC` | `paycore.outbox.events` | Kafka topic used by the outbox publisher adapter |
 | `PAYCORE_OUTBOX_PUBLISHER` | `logging` | Outbox publisher backend: `logging` or `kafka` |
+| `PAYCORE_RATE_LIMIT_ENABLED` | `false` | Enables Redis-backed rate limiting for payment mutation routes |
+| `PAYCORE_RATE_LIMIT_REQUESTS` | `60` | Fixed-window request limit per client key |
+| `PAYCORE_RATE_LIMIT_WINDOW_SECONDS` | `60` | Fixed-window length in seconds |
 
 Test the current endpoints:
 
@@ -212,6 +225,13 @@ To run the Kafka publisher integration test:
 ```bash
 docker compose up -d kafka
 PAYCORE_KAFKA_BROKERS=localhost:9092 go test ./internal/outbox/adapters/kafka
+```
+
+To run the Redis rate limiter integration test:
+
+```bash
+docker compose up -d redis
+PAYCORE_REDIS_ADDR=localhost:6379 go test ./internal/ratelimit/adapters/redis
 ```
 
 To run the Postgres + Kafka outbox worker integration test:
@@ -427,13 +447,13 @@ Current documentation:
 - `docs/payer.md`
 - `docs/payment.md`
 - `docs/postgresql-migrations.md`
+- `docs/rate-limiting.md`
 
 Planned documentation:
 
 - `docs/architecture-tradeoffs.md`
 - `docs/payment-lifecycle.md`
 - `docs/idempotency.md`
-- `docs/rate-limiting.md`
 - `docs/settlement.md`
 - `docs/outbox.md`
 - `docs/failure-modes.md`

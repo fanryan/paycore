@@ -16,6 +16,9 @@ type Config struct {
 	KafkaBrokers          string
 	KafkaOutboxTopic      string
 	OutboxPublisher       string
+	RateLimitEnabled      bool
+	RateLimitRequests     int64
+	RateLimitWindow       time.Duration
 	RepositoryBackend     string
 }
 
@@ -30,6 +33,9 @@ func Load() Config {
 		KafkaBrokers:          getenv("PAYCORE_KAFKA_BROKERS", "localhost:9092"),
 		KafkaOutboxTopic:      getenv("PAYCORE_KAFKA_OUTBOX_TOPIC", "paycore.outbox.events"),
 		OutboxPublisher:       getenv("PAYCORE_OUTBOX_PUBLISHER", "logging"),
+		RateLimitEnabled:      boolenv("PAYCORE_RATE_LIMIT_ENABLED", false),
+		RateLimitRequests:     int64env("PAYCORE_RATE_LIMIT_REQUESTS", 60),
+		RateLimitWindow:       durationSeconds("PAYCORE_RATE_LIMIT_WINDOW_SECONDS", time.Minute),
 		RepositoryBackend:     getenv("PAYCORE_REPOSITORY_BACKEND", "memory"),
 	}
 }
@@ -55,4 +61,32 @@ func durationSeconds(key string, fallback time.Duration) time.Duration {
 	}
 
 	return time.Duration(seconds) * time.Second
+}
+
+func boolenv(key string, fallback bool) bool {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return fallback
+	}
+
+	return parsed
+}
+
+func int64env(key string, fallback int64) int64 {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || parsed <= 0 {
+		return fallback
+	}
+
+	return parsed
 }
