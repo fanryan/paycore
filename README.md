@@ -32,7 +32,7 @@ Current development stage:
 - Panic recovery middleware implemented
 - Request body size limit middleware implemented
 - JSON error response shape introduced
-- Configuration loading implemented for environment, HTTP server settings, PostgreSQL URL, and Redis address
+- Configuration loading implemented for environment, HTTP server settings, PostgreSQL URL, Redis address, and Kafka brokers
 - Feature-first package layout introduced for merchant and payer modules
 - Merchant entity, service, repository interface, and in-memory adapter implemented
 - Payer entity, service, repository interface, and in-memory adapter implemented
@@ -52,7 +52,7 @@ Current development stage:
 - Shared currency normalization and validation implemented
 - Shared random id helper implemented
 - Central HTTP router migrated to chi for path parameters and feature route composition
-- Docker Compose local PostgreSQL and Redis infrastructure added
+- Docker Compose local PostgreSQL, Redis, and Kafka infrastructure added
 - `.env.example` added for local runtime configuration
 - HTTP API foundation and middleware tests added
 - Configuration tests added
@@ -93,6 +93,7 @@ Optional health checks:
 ```bash
 docker exec paycore-postgres pg_isready -U paycore -d paycore
 docker exec paycore-redis redis-cli ping
+docker exec paycore-kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list
 ```
 
 Apply local PostgreSQL migrations:
@@ -143,6 +144,7 @@ Supported local configuration:
 | `PAYCORE_REPOSITORY_BACKEND` | `memory` | Repository backend: `memory` or `postgres` |
 | `PAYCORE_DATABASE_URL` | empty | PostgreSQL connection string for migrations and repository adapters |
 | `PAYCORE_REDIS_ADDR` | `localhost:6379` | Redis address loaded for upcoming rate limiting and cache adapters |
+| `PAYCORE_KAFKA_BROKERS` | `localhost:9092` | Kafka broker list loaded for upcoming outbox publisher adapter |
 
 Test the current endpoints:
 

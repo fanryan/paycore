@@ -10,17 +10,20 @@ The repository currently provides Docker Compose services for:
 
 - PostgreSQL in `docker-compose.yml`.
 - Redis in `docker-compose.yml`.
-- Persistent Docker volumes for PostgreSQL and Redis.
-- Health checks for PostgreSQL and Redis.
+- Kafka in `docker-compose.yml`.
+- Persistent Docker volumes for PostgreSQL, Redis, and Kafka.
+- Health checks for PostgreSQL, Redis, and Kafka.
 - Local environment template in `.env.example`.
-- PostgreSQL merchant, payer, payment, hold, and idempotency schema migrations.
+- PostgreSQL merchant, payer, payment, hold, idempotency, and outbox schema migrations.
 - PostgreSQL repository runtime mode through `PAYCORE_REPOSITORY_BACKEND=postgres`.
+- Kafka broker configuration loading through `PAYCORE_KAFKA_BROKERS`.
 
 Current services:
 
 ```text
 paycore-postgres
 paycore-redis
+paycore-kafka
 ```
 
 ### Not Implemented Yet
@@ -31,7 +34,6 @@ These are planned but not currently implemented:
 - PostgreSQL settlement migrations.
 - Redis rate limiter.
 - Redis idempotency response cache.
-- Kafka broker.
 - Kafka-backed outbox publisher.
 - Prometheus and Grafana.
 - Dockerized PayCore API service.
@@ -66,6 +68,12 @@ Redis is planned for:
 
 Correctness must not depend on Redis durability. PostgreSQL remains authoritative for durable payment, balance, idempotency, settlement, and outbox state.
 
+### Kafka
+
+Kafka is planned for asynchronous lifecycle event delivery after durable PostgreSQL commits.
+
+The local broker exists now so the outbox publisher adapter can be built and tested against a repeatable dependency. PayCore does not publish to Kafka yet; the current outbox worker uses a logging publisher.
+
 ## 3. Runtime Flow
 
 Current local infrastructure startup:
@@ -80,6 +88,7 @@ Health checks:
 docker compose ps
 docker exec paycore-postgres pg_isready -U paycore -d paycore
 docker exec paycore-redis redis-cli ping
+docker exec paycore-kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list
 ```
 
 Shutdown:
@@ -96,18 +105,29 @@ docker compose down -v
 
 ## 4. Current Application Relationship
 
-The PayCore API does not yet connect to PostgreSQL or Redis at runtime.
+The PayCore API can run with either memory repositories or PostgreSQL repositories.
 
-Current API state is still in memory:
+Default API state is still in memory:
 
 ```text
 merchant memory repository
 payer memory repository
 payment memory repository
 idempotency memory repository
+outbox memory repository
 ```
 
-Docker Compose exists now so upcoming PostgreSQL and Redis work can be implemented against repeatable local services.
+PostgreSQL runtime mode is available through `PAYCORE_REPOSITORY_BACKEND=postgres`.
+
+```text
+merchant postgres repository
+payer postgres repository
+payment postgres repository
+idempotency postgres repository
+outbox postgres repository
+```
+
+Redis and Kafka are available in Docker Compose, but the API and worker do not yet use Redis-backed rate limiting, Redis-backed idempotency response caching, or Kafka-backed event publishing.
 
 ## 5. Configuration
 
@@ -121,9 +141,10 @@ PAYCORE_HTTP_SHUTDOWN_TIMEOUT_SECONDS=10
 
 PAYCORE_DATABASE_URL=postgres://paycore:paycore@localhost:5432/paycore?sslmode=disable
 PAYCORE_REDIS_ADDR=localhost:6379
+PAYCORE_KAFKA_BROKERS=localhost:9092
 ```
 
-The app currently loads the database URL, Redis address, and repository backend into shared configuration.
+The app currently loads the database URL, Redis address, Kafka brokers, and repository backend into shared configuration.
 
 The API can run with PostgreSQL repositories when started with:
 
@@ -135,6 +156,8 @@ go run ./cmd/paycore-api
 
 Redis is available in Docker Compose, but Redis-backed rate limiting and idempotency response caching are not implemented yet.
 
+Kafka is available in Docker Compose, but Kafka-backed outbox publishing is not implemented yet.
+
 ## 6. Tests
 
 Default automated tests do not require Docker Compose.
@@ -145,7 +168,7 @@ Existing tests use in-memory repositories and can run with:
 go test ./...
 ```
 
-PostgreSQL repository adapter tests and the API Postgres smoke test run against local PostgreSQL when `PAYCORE_DATABASE_URL` is set. Redis integration tests are planned once Redis-backed adapters exist.
+PostgreSQL repository adapter tests and the API Postgres smoke test run against local PostgreSQL when `PAYCORE_DATABASE_URL` is set. Redis and Kafka integration tests are planned once Redis-backed adapters and Kafka-backed publisher code exist.
 
 Schema migrations are plain SQL and are applied by the local `paycore-migrate` command.
 
@@ -159,11 +182,11 @@ PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=
 
 `docker-compose.yml`
 
-Defines local PostgreSQL and Redis services, ports, volumes, and health checks.
+Defines local PostgreSQL, Redis, and Kafka services, ports, volumes, and health checks.
 
 `.env.example`
 
-Documents local environment variables for API runtime and planned database/cache connections.
+Documents local environment variables for API runtime and planned database/cache/broker connections.
 
 `docs/local-infrastructure.md`
 
@@ -182,12 +205,14 @@ Applies local PostgreSQL migrations and records applied files in `schema_migrati
 - [x] Add `.env.example`.
 - [x] Add database config loading.
 - [x] Add Redis config loading.
+- [x] Add Kafka config loading.
 - [x] Add PostgreSQL merchant and payer migrations.
 - [x] Add PostgreSQL payment and idempotency migrations.
 - [x] Add migration runner.
 - [x] Add PostgreSQL repository adapters.
 - [x] Wire API runtime to PostgreSQL repository adapters.
+- [x] Add Kafka service.
 - [ ] Add Redis rate limiter.
 - [ ] Add Redis idempotency response cache.
-- [ ] Add Kafka service.
+- [ ] Add Kafka-backed outbox publisher.
 - [ ] Add Prometheus and Grafana services.
