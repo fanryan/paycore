@@ -14,6 +14,8 @@ type Config struct {
 	DatabaseURL           string
 	RedisAddr             string
 	KafkaBrokers          string
+	KafkaOutboxTopic      string
+	OutboxPublisher       string
 	RepositoryBackend     string
 }
 
@@ -26,6 +28,8 @@ func Load() Config {
 		DatabaseURL:           getenv("PAYCORE_DATABASE_URL", ""),
 		RedisAddr:             getenv("PAYCORE_REDIS_ADDR", "localhost:6379"),
 		KafkaBrokers:          getenv("PAYCORE_KAFKA_BROKERS", "localhost:9092"),
+		KafkaOutboxTopic:      getenv("PAYCORE_KAFKA_OUTBOX_TOPIC", "paycore.outbox.events"),
+		OutboxPublisher:       getenv("PAYCORE_OUTBOX_PUBLISHER", "logging"),
 		RepositoryBackend:     getenv("PAYCORE_REPOSITORY_BACKEND", "memory"),
 	}
 }

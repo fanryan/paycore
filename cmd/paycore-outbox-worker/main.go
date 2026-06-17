@@ -6,9 +6,11 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"time"
 
 	"github.com/fanryan/paycore/internal/outbox"
+	outboxkafka "github.com/fanryan/paycore/internal/outbox/adapters/kafka"
 	outboxpostgres "github.com/fanryan/paycore/internal/outbox/adapters/postgres"
 	"github.com/fanryan/paycore/internal/shared/config"
 	"github.com/fanryan/paycore/internal/shared/db"
@@ -45,9 +47,16 @@ func main() {
 		os.Exit(1)
 	}
 
+	publisher, closePublisher, err := newPublisher(cfg, logger)
+	if err != nil {
+		logger.Error("failed to create outbox publisher", "error", err)
+		os.Exit(1)
+	}
+	defer closePublisher()
+
 	worker, err := outbox.NewWorker(outbox.WorkerConfig{
 		Repository: outboxpostgres.NewStore(pool),
-		Publisher:  loggingPublisher{logger: logger},
+		Publisher:  publisher,
 		Transactor: db.NewPostgresTransactor(pool),
 		WorkerID:   workerID,
 		BatchSize:  batchSize,
@@ -66,6 +75,7 @@ func main() {
 		"worker_id", workerID,
 		"batch_size", batchSize,
 		"poll_interval", pollInterval.String(),
+		"publisher", cfg.OutboxPublisher,
 	)
 
 	for {
@@ -89,6 +99,29 @@ func main() {
 			return
 		case <-ticker.C:
 		}
+	}
+}
+
+func newPublisher(cfg config.Config, logger *slog.Logger) (outbox.Publisher, func(), error) {
+	switch strings.ToLower(strings.TrimSpace(cfg.OutboxPublisher)) {
+	case "", "logging":
+		return loggingPublisher{logger: logger}, func() {}, nil
+	case "kafka":
+		publisher, err := outboxkafka.NewPublisher(outboxkafka.PublisherConfig{
+			Brokers: outboxkafka.BrokersFromString(cfg.KafkaBrokers),
+			Topic:   cfg.KafkaOutboxTopic,
+		})
+		if err != nil {
+			return nil, nil, err
+		}
+
+		return publisher, func() {
+			if err := publisher.Close(); err != nil {
+				logger.Error("failed to close kafka publisher", "error", err)
+			}
+		}, nil
+	default:
+		return nil, nil, errors.New("unsupported outbox publisher")
 	}
 }
 

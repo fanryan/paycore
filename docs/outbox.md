@@ -22,12 +22,14 @@ This document explains the current PayCore transactional outbox foundation as it
 - Outbox worker command in `cmd/paycore-outbox-worker/main.go`.
 - Publisher interface in `internal/outbox/publisher.go`.
 - Logging publisher for local worker runs.
+- Kafka publisher adapter in `internal/outbox/adapters/kafka/publisher.go`.
+- Worker publisher backend selection through `PAYCORE_OUTBOX_PUBLISHER=logging|kafka`.
 - API Postgres smoke test verifies both payment lifecycle and outbox event rows.
 
 ### Not Implemented Yet
 
 - Retry backoff policy.
-- Kafka publishing.
+- Kafka publisher integration test.
 - Dead-letter handling.
 - LedgerFlow consumer integration.
 
@@ -76,9 +78,12 @@ internal/outbox
   |
   +--> event.go
   +--> repository.go
+  +--> publisher.go
+  +--> worker.go
   |
   +--> adapters/memory/repository.go
   +--> adapters/postgres/repository.go
+  +--> adapters/kafka/publisher.go
 ```
 
 The outbox package owns durable event shape and persistence. Payment service owns when payment lifecycle events are created.
@@ -132,7 +137,7 @@ Any outbox creation error aborts the payment service transaction.
 
 ### Service Input
 
-The publisher worker does not exist yet, but the repository contract is ready for it:
+The worker claims publishable events in batches:
 
 ```go
 outbox.ClaimPendingEventsInput{
@@ -144,7 +149,7 @@ outbox.ClaimPendingEventsInput{
 
 ### Step-by-Step
 
-1. A future publisher worker opens a transaction.
+1. The publisher worker opens a transaction.
 2. The worker calls `ClaimPendingEvents`.
 3. PostgreSQL selects claimable rows with `FOR UPDATE SKIP LOCKED`.
 4. Claimable rows are `PENDING` or retryable `FAILED` rows with `available_at <= now`.
@@ -186,7 +191,7 @@ If the claim transaction rolls back, claimed rows return to their previous state
 
 ### Service Input
 
-The worker owns publisher orchestration but does not know Kafka yet. It depends on a small publisher interface:
+The worker owns publisher orchestration and depends on a small publisher interface:
 
 ```go
 type Publisher interface {
@@ -225,6 +230,21 @@ If claiming fails, `ProcessBatch` returns the claim error and publishes nothing.
 If publishing fails for one event, that event is marked failed and the worker continues with the rest of the batch.
 
 If marking published or failed fails, `ProcessBatch` returns that repository error.
+
+### Publisher Backends
+
+The worker currently supports:
+
+- `logging`: local default publisher that logs event metadata.
+- `kafka`: Kafka publisher adapter that writes event payloads to `PAYCORE_KAFKA_OUTBOX_TOPIC`.
+
+`PAYCORE_KAFKA_OUTBOX_TOPIC` defaults to `paycore.outbox.events`.
+
+Kafka messages use:
+
+- message key: payment aggregate id
+- message value: event JSON payload
+- headers: event id, event type, aggregate type, aggregate id
 
 ## Validation And Errors
 
@@ -296,6 +316,8 @@ Current tests cover:
 - worker failed publish retry flow
 - worker empty batch behavior
 - worker dependency validation
+- Kafka broker parsing
+- Kafka publisher constructor validation
 - payment authorization outbox event creation
 - payment capture outbox event creation
 - API Postgres smoke coverage for outbox rows
@@ -318,7 +340,7 @@ Defines `Repository`, `NoopRepository`, claim inputs, mark-failed inputs, and re
 
 `internal/outbox/publisher.go`
 
-Defines the publisher interface used by the worker. Kafka will be an adapter for this interface later.
+Defines the publisher interface used by the worker.
 
 `internal/outbox/worker.go`
 
@@ -326,7 +348,11 @@ Claims events, calls the publisher interface, and marks events published or fail
 
 `cmd/paycore-outbox-worker/main.go`
 
-Runs the outbox worker loop with PostgreSQL repositories and a logging publisher.
+Runs the outbox worker loop with PostgreSQL repositories and a configurable publisher backend.
+
+`internal/outbox/adapters/kafka/publisher.go`
+
+Publishes outbox event payloads to Kafka with stable metadata headers.
 
 `internal/outbox/adapters/memory/repository.go`
 
@@ -352,5 +378,6 @@ Creates the durable outbox table and indexes.
 - [x] Add claim/retry repository methods.
 - [x] Add outbox publisher worker skeleton.
 - [x] Add runtime worker command.
-- [ ] Publish events to Kafka.
+- [x] Publish events to Kafka.
+- [ ] Add Kafka publisher integration test.
 - [ ] Add LedgerFlow integration notes.

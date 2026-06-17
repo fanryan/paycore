@@ -17,6 +17,8 @@ The repository currently provides Docker Compose services for:
 - PostgreSQL merchant, payer, payment, hold, idempotency, and outbox schema migrations.
 - PostgreSQL repository runtime mode through `PAYCORE_REPOSITORY_BACKEND=postgres`.
 - Kafka broker configuration loading through `PAYCORE_KAFKA_BROKERS`.
+- Kafka outbox topic configuration loading through `PAYCORE_KAFKA_OUTBOX_TOPIC`.
+- Outbox publisher selection through `PAYCORE_OUTBOX_PUBLISHER`.
 
 Current services:
 
@@ -34,7 +36,6 @@ These are planned but not currently implemented:
 - PostgreSQL settlement migrations.
 - Redis rate limiter.
 - Redis idempotency response cache.
-- Kafka-backed outbox publisher.
 - Prometheus and Grafana.
 - Dockerized PayCore API service.
 
@@ -72,7 +73,7 @@ Correctness must not depend on Redis durability. PostgreSQL remains authoritativ
 
 Kafka is planned for asynchronous lifecycle event delivery after durable PostgreSQL commits.
 
-The local broker exists now so the outbox publisher adapter can be built and tested against a repeatable dependency. PayCore does not publish to Kafka yet; the current outbox worker uses a logging publisher.
+The local broker exists now so the outbox publisher adapter can be run against a repeatable dependency. The outbox worker defaults to a logging publisher, but can publish to Kafka when `PAYCORE_OUTBOX_PUBLISHER=kafka`.
 
 ## 3. Runtime Flow
 
@@ -127,7 +128,7 @@ idempotency postgres repository
 outbox postgres repository
 ```
 
-Redis and Kafka are available in Docker Compose, but the API and worker do not yet use Redis-backed rate limiting, Redis-backed idempotency response caching, or Kafka-backed event publishing.
+Redis and Kafka are available in Docker Compose. The API does not yet use Redis-backed rate limiting or Redis-backed idempotency response caching. The outbox worker can publish to Kafka when explicitly configured.
 
 ## 5. Configuration
 
@@ -142,9 +143,11 @@ PAYCORE_HTTP_SHUTDOWN_TIMEOUT_SECONDS=10
 PAYCORE_DATABASE_URL=postgres://paycore:paycore@localhost:5432/paycore?sslmode=disable
 PAYCORE_REDIS_ADDR=localhost:6379
 PAYCORE_KAFKA_BROKERS=localhost:9092
+PAYCORE_KAFKA_OUTBOX_TOPIC=paycore.outbox.events
+PAYCORE_OUTBOX_PUBLISHER=logging
 ```
 
-The app currently loads the database URL, Redis address, Kafka brokers, and repository backend into shared configuration.
+The app currently loads the database URL, Redis address, Kafka brokers, Kafka outbox topic, outbox publisher backend, and repository backend into shared configuration.
 
 The API can run with PostgreSQL repositories when started with:
 
@@ -156,7 +159,7 @@ go run ./cmd/paycore-api
 
 Redis is available in Docker Compose, but Redis-backed rate limiting and idempotency response caching are not implemented yet.
 
-Kafka is available in Docker Compose, but Kafka-backed outbox publishing is not implemented yet.
+Kafka is available in Docker Compose. Kafka-backed outbox publishing is implemented behind `PAYCORE_OUTBOX_PUBLISHER=kafka`, while `logging` remains the default local worker mode.
 
 ## 6. Tests
 
@@ -168,7 +171,7 @@ Existing tests use in-memory repositories and can run with:
 go test ./...
 ```
 
-PostgreSQL repository adapter tests and the API Postgres smoke test run against local PostgreSQL when `PAYCORE_DATABASE_URL` is set. Redis and Kafka integration tests are planned once Redis-backed adapters and Kafka-backed publisher code exist.
+PostgreSQL repository adapter tests and the API Postgres smoke test run against local PostgreSQL when `PAYCORE_DATABASE_URL` is set. Redis integration tests are planned once Redis-backed adapters exist. Kafka publisher integration tests are planned after the publisher topic contract is finalized.
 
 Schema migrations are plain SQL and are applied by the local `paycore-migrate` command.
 
@@ -206,13 +209,15 @@ Applies local PostgreSQL migrations and records applied files in `schema_migrati
 - [x] Add database config loading.
 - [x] Add Redis config loading.
 - [x] Add Kafka config loading.
+- [x] Add Kafka outbox topic config loading.
+- [x] Add outbox publisher backend config loading.
 - [x] Add PostgreSQL merchant and payer migrations.
 - [x] Add PostgreSQL payment and idempotency migrations.
 - [x] Add migration runner.
 - [x] Add PostgreSQL repository adapters.
 - [x] Wire API runtime to PostgreSQL repository adapters.
 - [x] Add Kafka service.
+- [x] Add Kafka-backed outbox publisher.
 - [ ] Add Redis rate limiter.
 - [ ] Add Redis idempotency response cache.
-- [ ] Add Kafka-backed outbox publisher.
 - [ ] Add Prometheus and Grafana services.

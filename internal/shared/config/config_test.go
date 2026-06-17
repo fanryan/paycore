@@ -13,6 +13,8 @@ func TestLoadUsesDefaults(t *testing.T) {
 	t.Setenv("PAYCORE_DATABASE_URL", "")
 	t.Setenv("PAYCORE_REDIS_ADDR", "")
 	t.Setenv("PAYCORE_KAFKA_BROKERS", "")
+	t.Setenv("PAYCORE_KAFKA_OUTBOX_TOPIC", "")
+	t.Setenv("PAYCORE_OUTBOX_PUBLISHER", "")
 	t.Setenv("PAYCORE_REPOSITORY_BACKEND", "")
 
 	cfg := Load()
@@ -45,6 +47,14 @@ func TestLoadUsesDefaults(t *testing.T) {
 		t.Fatalf("expected kafka brokers localhost:9092, got %q", cfg.KafkaBrokers)
 	}
 
+	if cfg.KafkaOutboxTopic != "paycore.outbox.events" {
+		t.Fatalf("expected kafka outbox topic paycore.outbox.events, got %q", cfg.KafkaOutboxTopic)
+	}
+
+	if cfg.OutboxPublisher != "logging" {
+		t.Fatalf("expected outbox publisher logging, got %q", cfg.OutboxPublisher)
+	}
+
 	if cfg.RepositoryBackend != "memory" {
 		t.Fatalf("expected repository backend memory, got %q", cfg.RepositoryBackend)
 	}
@@ -58,6 +68,8 @@ func TestLoadUsesEnvironmentOverrides(t *testing.T) {
 	t.Setenv("PAYCORE_DATABASE_URL", "postgres://paycore:paycore@localhost:5432/paycore?sslmode=disable")
 	t.Setenv("PAYCORE_REDIS_ADDR", "redis:6379")
 	t.Setenv("PAYCORE_KAFKA_BROKERS", "kafka:9092")
+	t.Setenv("PAYCORE_KAFKA_OUTBOX_TOPIC", "paycore.payment.events")
+	t.Setenv("PAYCORE_OUTBOX_PUBLISHER", "kafka")
 	t.Setenv("PAYCORE_REPOSITORY_BACKEND", "postgres")
 
 	cfg := Load()
@@ -88,6 +100,14 @@ func TestLoadUsesEnvironmentOverrides(t *testing.T) {
 
 	if cfg.KafkaBrokers != "kafka:9092" {
 		t.Fatalf("expected kafka brokers kafka:9092, got %q", cfg.KafkaBrokers)
+	}
+
+	if cfg.KafkaOutboxTopic != "paycore.payment.events" {
+		t.Fatalf("expected kafka outbox topic paycore.payment.events, got %q", cfg.KafkaOutboxTopic)
+	}
+
+	if cfg.OutboxPublisher != "kafka" {
+		t.Fatalf("expected outbox publisher kafka, got %q", cfg.OutboxPublisher)
 	}
 
 	if cfg.RepositoryBackend != "postgres" {

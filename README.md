@@ -42,6 +42,7 @@ Current development stage:
 - Shared transactor added for Postgres transaction propagation through `context.Context`
 - Transactional outbox foundation implemented for `payment.authorized` and `payment.captured` events
 - Outbox claim/retry repository methods implemented with PostgreSQL `FOR UPDATE SKIP LOCKED`
+- Outbox worker can publish through the local logging publisher or Kafka publisher adapter
 - Merchant HTTP create and list endpoints implemented
 - Payer HTTP create and list endpoints implemented
 - Payer balance reservation, release, and held-capture behavior implemented
@@ -116,10 +117,20 @@ PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=
 go run ./cmd/paycore-api
 ```
 
-Start the outbox worker with the current logging publisher:
+Start the outbox worker with the default logging publisher:
 
 ```bash
 PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=disable' \
+go run ./cmd/paycore-outbox-worker
+```
+
+Start the outbox worker with Kafka publishing:
+
+```bash
+PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=disable' \
+PAYCORE_OUTBOX_PUBLISHER=kafka \
+PAYCORE_KAFKA_BROKERS=localhost:9092 \
+PAYCORE_KAFKA_OUTBOX_TOPIC=paycore.outbox.events \
 go run ./cmd/paycore-outbox-worker
 ```
 
@@ -145,6 +156,8 @@ Supported local configuration:
 | `PAYCORE_DATABASE_URL` | empty | PostgreSQL connection string for migrations and repository adapters |
 | `PAYCORE_REDIS_ADDR` | `localhost:6379` | Redis address loaded for upcoming rate limiting and cache adapters |
 | `PAYCORE_KAFKA_BROKERS` | `localhost:9092` | Kafka broker list loaded for upcoming outbox publisher adapter |
+| `PAYCORE_KAFKA_OUTBOX_TOPIC` | `paycore.outbox.events` | Kafka topic used by the outbox publisher adapter |
+| `PAYCORE_OUTBOX_PUBLISHER` | `logging` | Outbox publisher backend: `logging` or `kafka` |
 
 Test the current endpoints:
 
