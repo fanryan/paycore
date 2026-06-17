@@ -319,6 +319,7 @@ Current tests cover:
 - Kafka broker parsing
 - Kafka publisher constructor validation
 - Kafka publisher integration test when `PAYCORE_KAFKA_BROKERS` is set
+- Postgres + Kafka worker integration test when `PAYCORE_DATABASE_URL` and `PAYCORE_KAFKA_BROKERS` are set
 - payment authorization outbox event creation
 - payment capture outbox event creation
 - API Postgres smoke coverage for outbox rows
@@ -334,6 +335,16 @@ Run the Kafka publisher integration test:
 ```bash
 docker compose up -d kafka
 PAYCORE_KAFKA_BROKERS=localhost:9092 go test ./internal/outbox/adapters/kafka
+```
+
+Run the Postgres + Kafka outbox worker integration test:
+
+```bash
+docker compose up -d postgres kafka
+PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=disable' go run ./cmd/paycore-migrate
+PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=disable' \
+PAYCORE_KAFKA_BROKERS=localhost:9092 \
+go test ./internal/outbox
 ```
 
 ## File Guide
@@ -388,4 +399,5 @@ Creates the durable outbox table and indexes.
 - [x] Add runtime worker command.
 - [x] Publish events to Kafka.
 - [x] Add Kafka publisher integration test.
+- [x] Add Postgres + Kafka worker integration test.
 - [ ] Add LedgerFlow integration notes.

@@ -214,6 +214,16 @@ docker compose up -d kafka
 PAYCORE_KAFKA_BROKERS=localhost:9092 go test ./internal/outbox/adapters/kafka
 ```
 
+To run the Postgres + Kafka outbox worker integration test:
+
+```bash
+docker compose up -d postgres kafka
+PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=disable' go run ./cmd/paycore-migrate
+PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=disable' \
+PAYCORE_KAFKA_BROKERS=localhost:9092 \
+go test ./internal/outbox
+```
+
 ## Current Repository Structure
 
 ```text
