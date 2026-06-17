@@ -3,6 +3,7 @@ package outbox
 import (
 	"context"
 	"errors"
+	"time"
 )
 
 var (
@@ -10,8 +11,24 @@ var (
 	ErrDuplicateEvent = errors.New("outbox event already exists")
 )
 
+type ClaimPendingEventsInput struct {
+	WorkerID string
+	Limit    int
+	Now      time.Time
+}
+
+type MarkEventFailedInput struct {
+	EventID       string
+	ErrorMessage  string
+	NextAvailable time.Time
+	Now           time.Time
+}
+
 type Repository interface {
 	CreateEvent(ctx context.Context, event Event) (Event, error)
+	ClaimPendingEvents(ctx context.Context, input ClaimPendingEventsInput) ([]Event, error)
+	MarkEventPublished(ctx context.Context, eventID string, now time.Time) (Event, error)
+	MarkEventFailed(ctx context.Context, input MarkEventFailedInput) (Event, error)
 }
 
 type NoopRepository struct{}
@@ -22,4 +39,28 @@ func (NoopRepository) CreateEvent(ctx context.Context, event Event) (Event, erro
 	}
 
 	return event, nil
+}
+
+func (NoopRepository) ClaimPendingEvents(ctx context.Context, input ClaimPendingEventsInput) ([]Event, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	return nil, nil
+}
+
+func (NoopRepository) MarkEventPublished(ctx context.Context, eventID string, now time.Time) (Event, error) {
+	if err := ctx.Err(); err != nil {
+		return Event{}, err
+	}
+
+	return Event{}, ErrEventNotFound
+}
+
+func (NoopRepository) MarkEventFailed(ctx context.Context, input MarkEventFailedInput) (Event, error) {
+	if err := ctx.Err(); err != nil {
+		return Event{}, err
+	}
+
+	return Event{}, ErrEventNotFound
 }

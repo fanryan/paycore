@@ -35,7 +35,7 @@ These are planned but not currently implemented:
 - Automatic migration execution in app startup.
 - Settlement migrations.
 - Single transaction that also includes idempotency completion.
-- Outbox publisher claiming and retry behavior.
+- Outbox publisher worker loop.
 - Redis-backed idempotency response cache.
 
 ## 2. Migration Files
@@ -184,7 +184,7 @@ Current constraints:
 
 Current indexes:
 
-- partial index on pending events by availability time for future publisher claim scans.
+- partial index on pending events by availability time for publisher claim scans.
 - aggregate lookup index on aggregate type, aggregate id, and creation time.
 
 Payment authorization currently writes a `payment.authorized` event. Payment capture writes a `payment.captured` event. In Postgres mode, those event inserts run inside the payment service transaction with payer, payment, and hold mutations.

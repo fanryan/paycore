@@ -18,6 +18,12 @@ const (
 	StatusFailed     Status = "FAILED"
 )
 
+var (
+	ErrEventNotClaimable   = errors.New("outbox event is not claimable")
+	ErrEventNotPublishable = errors.New("outbox event is not publishable")
+	ErrEventNotFailable    = errors.New("outbox event is not failable")
+)
+
 type Event struct {
 	ID            string
 	AggregateType string
@@ -84,4 +90,67 @@ func NewEvent(input NewEventInput) (Event, error) {
 		CreatedAt:     now,
 		UpdatedAt:     now,
 	}, nil
+}
+
+func (e Event) Claim(workerID string, now time.Time) (Event, error) {
+	workerID = strings.TrimSpace(workerID)
+	if workerID == "" {
+		return Event{}, errors.New("worker id is required")
+	}
+
+	if e.Status != StatusPending && e.Status != StatusFailed {
+		return Event{}, ErrEventNotClaimable
+	}
+
+	now = now.UTC()
+
+	e.Status = StatusInProgress
+	e.Attempts++
+	e.LockedAt = &now
+	e.LockedBy = &workerID
+	e.LastError = nil
+	e.UpdatedAt = now
+
+	return e, nil
+}
+
+func (e Event) MarkPublished(now time.Time) (Event, error) {
+	if e.Status != StatusInProgress {
+		return Event{}, ErrEventNotPublishable
+	}
+
+	now = now.UTC()
+
+	e.Status = StatusPublished
+	e.PublishedAt = &now
+	e.LockedAt = nil
+	e.LockedBy = nil
+	e.LastError = nil
+	e.UpdatedAt = now
+
+	return e, nil
+}
+
+func (e Event) MarkFailed(errorMessage string, nextAvailableAt time.Time, now time.Time) (Event, error) {
+	if e.Status != StatusInProgress {
+		return Event{}, ErrEventNotFailable
+	}
+
+	errorMessage = strings.TrimSpace(errorMessage)
+	if errorMessage == "" {
+		return Event{}, errors.New("error message is required")
+	}
+
+	now = now.UTC()
+	nextAvailableAt = nextAvailableAt.UTC()
+
+	e.Status = StatusFailed
+	e.AvailableAt = nextAvailableAt
+	e.LockedAt = nil
+	e.LockedBy = nil
+	e.PublishedAt = nil
+	e.LastError = &errorMessage
+	e.UpdatedAt = now
+
+	return e, nil
 }

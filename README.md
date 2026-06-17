@@ -41,6 +41,7 @@ Current development stage:
 - Runtime repository backend switch implemented with `PAYCORE_REPOSITORY_BACKEND=memory|postgres`
 - Shared transactor added for Postgres transaction propagation through `context.Context`
 - Transactional outbox foundation implemented for `payment.authorized` and `payment.captured` events
+- Outbox claim/retry repository methods implemented with PostgreSQL `FOR UPDATE SKIP LOCKED`
 - Merchant HTTP create and list endpoints implemented
 - Payer HTTP create and list endpoints implemented
 - Payer balance reservation, release, and held-capture behavior implemented

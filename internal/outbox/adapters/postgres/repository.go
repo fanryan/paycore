@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/fanryan/paycore/internal/outbox"
 	"github.com/fanryan/paycore/internal/shared/db"
@@ -85,6 +86,166 @@ func (s *Store) CreateEvent(ctx context.Context, event outbox.Event) (outbox.Eve
 	}
 
 	return created, nil
+}
+
+func (s *Store) ClaimPendingEvents(ctx context.Context, input outbox.ClaimPendingEventsInput) ([]outbox.Event, error) {
+	if input.Limit <= 0 {
+		return []outbox.Event{}, nil
+	}
+
+	tx, ok := db.TxFromContext(ctx)
+	if !ok {
+		return nil, errors.New("claim pending outbox events requires an active transaction")
+	}
+
+	const query = `
+		WITH claimable AS (
+			SELECT id
+			FROM outbox_events
+			WHERE status IN ('PENDING', 'FAILED')
+			AND available_at <= $1
+			ORDER BY available_at ASC, created_at ASC, id ASC
+			LIMIT $2
+			FOR UPDATE SKIP LOCKED
+		)
+		UPDATE outbox_events AS event
+		SET
+			status = 'IN_PROGRESS',
+			attempts = event.attempts + 1,
+			locked_at = $1,
+			locked_by = $3,
+			last_error = NULL,
+			updated_at = $1
+		FROM claimable
+		WHERE event.id = claimable.id
+		RETURNING
+			event.id,
+			event.aggregate_type,
+			event.aggregate_id,
+			event.event_type,
+			event.payload,
+			event.status,
+			event.attempts,
+			event.available_at,
+			event.created_at,
+			event.updated_at,
+			event.locked_at,
+			event.locked_by,
+			event.published_at,
+			event.last_error
+	`
+
+	rows, err := tx.Query(ctx, query, input.Now.UTC(), input.Limit, input.WorkerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	events := make([]outbox.Event, 0)
+	for rows.Next() {
+		event, err := scanEvent(rows)
+		if err != nil {
+			return nil, err
+		}
+
+		events = append(events, event)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return events, nil
+}
+
+func (s *Store) MarkEventPublished(ctx context.Context, eventID string, now time.Time) (outbox.Event, error) {
+	const query = `
+		UPDATE outbox_events
+		SET
+			status = 'PUBLISHED',
+			published_at = $2,
+			locked_at = NULL,
+			locked_by = NULL,
+			last_error = NULL,
+			updated_at = $2
+		WHERE id = $1
+		AND status = 'IN_PROGRESS'
+		RETURNING
+			id,
+			aggregate_type,
+			aggregate_id,
+			event_type,
+			payload,
+			status,
+			attempts,
+			available_at,
+			created_at,
+			updated_at,
+			locked_at,
+			locked_by,
+			published_at,
+			last_error
+	`
+
+	published, err := scanEvent(s.queryRow(ctx, query, eventID, now.UTC()))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return outbox.Event{}, outbox.ErrEventNotFound
+		}
+
+		return outbox.Event{}, err
+	}
+
+	return published, nil
+}
+
+func (s *Store) MarkEventFailed(ctx context.Context, input outbox.MarkEventFailedInput) (outbox.Event, error) {
+	const query = `
+		UPDATE outbox_events
+		SET
+			status = 'FAILED',
+			available_at = $2,
+			locked_at = NULL,
+			locked_by = NULL,
+			published_at = NULL,
+			last_error = $3,
+			updated_at = $4
+		WHERE id = $1
+		AND status = 'IN_PROGRESS'
+		RETURNING
+			id,
+			aggregate_type,
+			aggregate_id,
+			event_type,
+			payload,
+			status,
+			attempts,
+			available_at,
+			created_at,
+			updated_at,
+			locked_at,
+			locked_by,
+			published_at,
+			last_error
+	`
+
+	failed, err := scanEvent(s.queryRow(
+		ctx,
+		query,
+		input.EventID,
+		input.NextAvailable.UTC(),
+		input.ErrorMessage,
+		input.Now.UTC(),
+	))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return outbox.Event{}, outbox.ErrEventNotFound
+		}
+
+		return outbox.Event{}, err
+	}
+
+	return failed, nil
 }
 
 func (s *Store) queryRow(ctx context.Context, sql string, args ...any) pgx.Row {

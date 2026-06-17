@@ -2,7 +2,9 @@ package memory
 
 import (
 	"context"
+	"sort"
 	"sync"
+	"time"
 
 	"github.com/fanryan/paycore/internal/outbox"
 )
@@ -33,6 +35,107 @@ func (s *Store) CreateEvent(ctx context.Context, event outbox.Event) (outbox.Eve
 	s.events[event.ID] = event
 
 	return event, nil
+}
+
+func (s *Store) ClaimPendingEvents(ctx context.Context, input outbox.ClaimPendingEventsInput) ([]outbox.Event, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	if input.Limit <= 0 {
+		return []outbox.Event{}, nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	claimable := make([]outbox.Event, 0)
+	for _, event := range s.events {
+		if event.AvailableAt.After(input.Now) {
+			continue
+		}
+
+		if event.Status != outbox.StatusPending && event.Status != outbox.StatusFailed {
+			continue
+		}
+
+		claimable = append(claimable, event)
+	}
+
+	sort.Slice(claimable, func(i, j int) bool {
+		if !claimable[i].AvailableAt.Equal(claimable[j].AvailableAt) {
+			return claimable[i].AvailableAt.Before(claimable[j].AvailableAt)
+		}
+
+		if !claimable[i].CreatedAt.Equal(claimable[j].CreatedAt) {
+			return claimable[i].CreatedAt.Before(claimable[j].CreatedAt)
+		}
+
+		return claimable[i].ID < claimable[j].ID
+	})
+
+	if len(claimable) > input.Limit {
+		claimable = claimable[:input.Limit]
+	}
+
+	claimed := make([]outbox.Event, 0, len(claimable))
+	for _, event := range claimable {
+		claimedEvent, err := event.Claim(input.WorkerID, input.Now)
+		if err != nil {
+			return nil, err
+		}
+
+		s.events[claimedEvent.ID] = claimedEvent
+		claimed = append(claimed, claimedEvent)
+	}
+
+	return claimed, nil
+}
+
+func (s *Store) MarkEventPublished(ctx context.Context, eventID string, now time.Time) (outbox.Event, error) {
+	if err := ctx.Err(); err != nil {
+		return outbox.Event{}, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	event, exists := s.events[eventID]
+	if !exists {
+		return outbox.Event{}, outbox.ErrEventNotFound
+	}
+
+	published, err := event.MarkPublished(now)
+	if err != nil {
+		return outbox.Event{}, err
+	}
+
+	s.events[eventID] = published
+
+	return published, nil
+}
+
+func (s *Store) MarkEventFailed(ctx context.Context, input outbox.MarkEventFailedInput) (outbox.Event, error) {
+	if err := ctx.Err(); err != nil {
+		return outbox.Event{}, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	event, exists := s.events[input.EventID]
+	if !exists {
+		return outbox.Event{}, outbox.ErrEventNotFound
+	}
+
+	failed, err := event.MarkFailed(input.ErrorMessage, input.NextAvailable, input.Now)
+	if err != nil {
+		return outbox.Event{}, err
+	}
+
+	s.events[input.EventID] = failed
+
+	return failed, nil
 }
 
 func (s *Store) ListEvents(ctx context.Context) ([]outbox.Event, error) {
