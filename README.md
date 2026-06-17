@@ -207,6 +207,13 @@ PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=
 PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=disable' go test ./...
 ```
 
+To run the Kafka publisher integration test:
+
+```bash
+docker compose up -d kafka
+PAYCORE_KAFKA_BROKERS=localhost:9092 go test ./internal/outbox/adapters/kafka
+```
+
 ## Current Repository Structure
 
 ```text

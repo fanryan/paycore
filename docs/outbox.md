@@ -318,6 +318,7 @@ Current tests cover:
 - worker dependency validation
 - Kafka broker parsing
 - Kafka publisher constructor validation
+- Kafka publisher integration test when `PAYCORE_KAFKA_BROKERS` is set
 - payment authorization outbox event creation
 - payment capture outbox event creation
 - API Postgres smoke coverage for outbox rows
@@ -326,6 +327,13 @@ Run:
 
 ```bash
 go test ./...
+```
+
+Run the Kafka publisher integration test:
+
+```bash
+docker compose up -d kafka
+PAYCORE_KAFKA_BROKERS=localhost:9092 go test ./internal/outbox/adapters/kafka
 ```
 
 ## File Guide
@@ -379,5 +387,5 @@ Creates the durable outbox table and indexes.
 - [x] Add outbox publisher worker skeleton.
 - [x] Add runtime worker command.
 - [x] Publish events to Kafka.
-- [ ] Add Kafka publisher integration test.
+- [x] Add Kafka publisher integration test.
 - [ ] Add LedgerFlow integration notes.
