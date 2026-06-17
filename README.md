@@ -75,7 +75,7 @@ POST /payments/authorize
 POST /payments/{payment_id}/capture
 ```
 
-Runtime wiring to PostgreSQL repositories is available through `PAYCORE_REPOSITORY_BACKEND=postgres`. Memory repositories remain the default. Redis, Kafka, Prometheus, settlement processing, and the outbox publisher worker have not been implemented yet.
+Runtime wiring to PostgreSQL repositories is available through `PAYCORE_REPOSITORY_BACKEND=postgres`. Memory repositories remain the default. Redis, Kafka, Prometheus, settlement processing, and Kafka-backed outbox publishing have not been implemented yet.
 
 Payment authorization and capture enforce `Idempotency-Key`. In memory mode, idempotency records are process-local. In Postgres mode, merchant, payer, payment, hold, idempotency, and outbox records use PostgreSQL repositories. Payment authorization and capture business mutations plus outbox event creation run through a service-level transaction boundary in Postgres mode.
 
@@ -114,6 +114,15 @@ PAYCORE_REPOSITORY_BACKEND=postgres \
 PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=disable' \
 go run ./cmd/paycore-api
 ```
+
+Start the outbox worker with the current logging publisher:
+
+```bash
+PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=disable' \
+go run ./cmd/paycore-outbox-worker
+```
+
+Run migrations before starting the worker. The worker requires the `outbox_events` table from `migrations/000005_create_outbox_events.sql`.
 
 The API listens on port `8080` by default.
 
@@ -191,6 +200,8 @@ paycore/
     paycore-api/
       main.go
       main_test.go
+    paycore-outbox-worker/
+      main.go
     paycore-migrate/
       main.go
   internal/
@@ -226,10 +237,14 @@ paycore/
     outbox/
       event.go
       event_test.go
+      publisher.go
       repository.go
+      worker.go
+      worker_test.go
       adapters/
         memory/
           repository.go
+          repository_test.go
         postgres/
           repository.go
           repository_test.go

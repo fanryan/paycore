@@ -28,11 +28,11 @@ paycore-redis
 These are planned but not currently implemented:
 
 - Application runtime connection to Redis.
-- PostgreSQL settlement and outbox migrations.
+- PostgreSQL settlement migrations.
 - Redis rate limiter.
 - Redis idempotency response cache.
 - Kafka broker.
-- Outbox publisher.
+- Kafka-backed outbox publisher.
 - Prometheus and Grafana.
 - Dockerized PayCore API service.
 

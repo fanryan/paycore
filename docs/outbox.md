@@ -19,13 +19,14 @@ This document explains the current PayCore transactional outbox foundation as it
 - Claimed events can be marked `PUBLISHED`.
 - Claimed events can be marked `FAILED` with a future retry availability time.
 - Outbox worker skeleton in `internal/outbox/worker.go`.
+- Outbox worker command in `cmd/paycore-outbox-worker/main.go`.
 - Publisher interface in `internal/outbox/publisher.go`.
+- Logging publisher for local worker runs.
 - API Postgres smoke test verifies both payment lifecycle and outbox event rows.
 
 ### Not Implemented Yet
 
 - Retry backoff policy.
-- Runtime worker command or process.
 - Kafka publishing.
 - Dead-letter handling.
 - LedgerFlow consumer integration.
@@ -59,6 +60,14 @@ main()
   +--> payment service receives outbox repository and transactor
   +--> starts net/http server
 ```
+
+The worker command starts separately:
+
+```bash
+PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=disable' go run ./cmd/paycore-outbox-worker
+```
+
+Run migrations before starting the worker so `outbox_events` exists.
 
 ### Feature Package Boundary
 
@@ -315,6 +324,10 @@ Defines the publisher interface used by the worker. Kafka will be an adapter for
 
 Claims events, calls the publisher interface, and marks events published or failed.
 
+`cmd/paycore-outbox-worker/main.go`
+
+Runs the outbox worker loop with PostgreSQL repositories and a logging publisher.
+
 `internal/outbox/adapters/memory/repository.go`
 
 Provides the memory repository used by local memory mode and service tests.
@@ -338,6 +351,6 @@ Creates the durable outbox table and indexes.
 - [x] Emit `payment.captured`.
 - [x] Add claim/retry repository methods.
 - [x] Add outbox publisher worker skeleton.
-- [ ] Add runtime worker command or process.
+- [x] Add runtime worker command.
 - [ ] Publish events to Kafka.
 - [ ] Add LedgerFlow integration notes.
