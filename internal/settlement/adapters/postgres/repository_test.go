@@ -147,6 +147,72 @@ func TestRepositoryRejectsDuplicateLineItemForPayment(t *testing.T) {
 	}
 }
 
+func TestRepositoryClaimsCapturedPaymentsInTransaction(t *testing.T) {
+	ctx := context.Background()
+	pool := newTestPool(t)
+	store := settlementpostgres.NewStore(pool)
+	transactor := db.NewPostgresTransactor(pool)
+	prefix := testPrefix()
+	t.Cleanup(func() {
+		cleanupSettlementRows(t, pool, prefix)
+	})
+
+	batch := createBatch(t, store, prefix+"-batch-1")
+	createPaymentFixture(t, pool, prefix+"-merchant-1", prefix+"-payer-1", prefix+"-payment-1")
+	createPaymentFixture(t, pool, prefix+"-merchant-1", prefix+"-payer-2", prefix+"-payment-2")
+	createAuthorizedPaymentFixture(t, pool, prefix+"-merchant-1", prefix+"-payer-3", prefix+"-payment-authorized")
+
+	var claimed []settlement.ClaimedPayment
+	err := transactor.WithinTx(ctx, func(ctx context.Context) error {
+		var err error
+		claimed, err = store.ClaimCapturedPayments(ctx, settlement.ClaimCapturedPaymentsInput{
+			BatchID:     batch.ID,
+			WindowStart: testNow().Add(-time.Hour),
+			WindowEnd:   testNow().Add(time.Hour),
+			Limit:       10,
+			Now:         testNow(),
+		})
+
+		return err
+	})
+	if err != nil {
+		t.Fatalf("claim captured payments: %v", err)
+	}
+
+	if len(claimed) != 2 {
+		t.Fatalf("expected 2 claimed payments, got %d", len(claimed))
+	}
+
+	if claimed[0].PaymentID != prefix+"-payment-1" {
+		t.Fatalf("expected first claimed payment %q, got %q", prefix+"-payment-1", claimed[0].PaymentID)
+	}
+
+	if claimed[0].SettlementBatch != batch.ID {
+		t.Fatalf("expected settlement batch %q, got %q", batch.ID, claimed[0].SettlementBatch)
+	}
+
+	assertPaymentSettlementBatch(t, pool, prefix+"-payment-1", batch.ID)
+	assertPaymentSettlementBatch(t, pool, prefix+"-payment-2", batch.ID)
+	assertPaymentSettlementBatch(t, pool, prefix+"-payment-authorized", "")
+}
+
+func TestRepositoryClaimCapturedPaymentsRequiresTransaction(t *testing.T) {
+	ctx := context.Background()
+	pool := newTestPool(t)
+	store := settlementpostgres.NewStore(pool)
+
+	_, err := store.ClaimCapturedPayments(ctx, settlement.ClaimCapturedPaymentsInput{
+		BatchID:     "batch-1",
+		WindowStart: testNow().Add(-time.Hour),
+		WindowEnd:   testNow(),
+		Limit:       10,
+		Now:         testNow(),
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
 func TestRepositoryCreateBatchUsesContextTransaction(t *testing.T) {
 	ctx := context.Background()
 	pool := newTestPool(t)
@@ -293,6 +359,72 @@ func createPaymentFixture(t *testing.T, pool *pgxpool.Pool, merchantID string, p
 		VALUES ($1, $2, $3, 10000, 'USD', 'CAPTURED', $4, $5, $6, $7, $5, $5)
 	`, paymentID, merchantID, payerID, paymentID+"-hold", now, now.Add(time.Hour), now.Add(30*time.Minute)); err != nil {
 		t.Fatalf("create payment fixture: %v", err)
+	}
+}
+
+func createAuthorizedPaymentFixture(t *testing.T, pool *pgxpool.Pool, merchantID string, payerID string, paymentID string) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	now := testNow()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO merchants (id, name, status, settlement_currency, created_at, updated_at)
+		VALUES ($1, $2, 'ACTIVE', 'USD', $3, $3)
+		ON CONFLICT (id) DO NOTHING
+	`, merchantID, merchantID, now); err != nil {
+		t.Fatalf("create merchant fixture: %v", err)
+	}
+
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO payers (id, available_balance_minor, held_balance_minor, currency, version, created_at, updated_at)
+		VALUES ($1, 0, 0, 'USD', 0, $2, $2)
+		ON CONFLICT (id) DO NOTHING
+	`, payerID, now); err != nil {
+		t.Fatalf("create payer fixture: %v", err)
+	}
+
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO payments (
+			id,
+			merchant_id,
+			payer_id,
+			amount_minor,
+			currency,
+			status,
+			authorization_hold_id,
+			authorized_at,
+			expires_at,
+			created_at,
+			updated_at
+		)
+		VALUES ($1, $2, $3, 10000, 'USD', 'AUTHORIZED', $4, $5, $6, $5, $5)
+	`, paymentID, merchantID, payerID, paymentID+"-hold", now, now.Add(time.Hour)); err != nil {
+		t.Fatalf("create authorized payment fixture: %v", err)
+	}
+}
+
+func assertPaymentSettlementBatch(t *testing.T, pool *pgxpool.Pool, paymentID string, expectedBatchID string) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var batchID *string
+	if err := pool.QueryRow(ctx, "SELECT settlement_batch_id FROM payments WHERE id = $1", paymentID).Scan(&batchID); err != nil {
+		t.Fatalf("query payment settlement batch: %v", err)
+	}
+
+	if expectedBatchID == "" {
+		if batchID != nil {
+			t.Fatalf("expected payment %q to have no settlement batch, got %q", paymentID, *batchID)
+		}
+		return
+	}
+
+	if batchID == nil || *batchID != expectedBatchID {
+		t.Fatalf("expected payment %q settlement batch %q, got %v", paymentID, expectedBatchID, batchID)
 	}
 }
 

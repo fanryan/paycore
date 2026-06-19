@@ -3,6 +3,7 @@ package settlement
 import (
 	"context"
 	"errors"
+	"time"
 )
 
 var (
@@ -17,6 +18,24 @@ type Repository interface {
 	CreateBatch(ctx context.Context, batch Batch) (Batch, error)
 	GetBatch(ctx context.Context, batchID string) (Batch, error)
 	UpdateBatch(ctx context.Context, batch Batch) (Batch, error)
+	ClaimCapturedPayments(ctx context.Context, input ClaimCapturedPaymentsInput) ([]ClaimedPayment, error)
 	CreateLineItem(ctx context.Context, item LineItem) (LineItem, error)
 	ListLineItems(ctx context.Context, batchID string) ([]LineItem, error)
+}
+
+type ClaimCapturedPaymentsInput struct {
+	BatchID     string
+	WindowStart time.Time
+	WindowEnd   time.Time
+	Limit       int
+	Now         time.Time
+}
+
+type ClaimedPayment struct {
+	PaymentID       string
+	MerchantID      string
+	AmountMinor     int64
+	Currency        string
+	CapturedAt      time.Time
+	SettlementBatch string
 }

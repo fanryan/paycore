@@ -152,6 +152,74 @@ func (s *Store) UpdateBatch(ctx context.Context, batch settlement.Batch) (settle
 	return updated, nil
 }
 
+func (s *Store) ClaimCapturedPayments(ctx context.Context, input settlement.ClaimCapturedPaymentsInput) ([]settlement.ClaimedPayment, error) {
+	if input.Limit <= 0 {
+		return []settlement.ClaimedPayment{}, nil
+	}
+
+	tx, ok := db.TxFromContext(ctx)
+	if !ok {
+		return nil, errors.New("claim captured payments requires an active transaction")
+	}
+
+	const query = `
+		WITH claimable AS (
+			SELECT id
+			FROM payments
+			WHERE status = 'CAPTURED'
+			AND settlement_batch_id IS NULL
+			AND captured_at >= $1
+			AND captured_at < $2
+			ORDER BY captured_at ASC, id ASC
+			LIMIT $3
+			FOR UPDATE SKIP LOCKED
+		)
+		UPDATE payments AS payment
+		SET
+			settlement_batch_id = $4,
+			updated_at = $5
+		FROM claimable
+		WHERE payment.id = claimable.id
+		RETURNING
+			payment.id,
+			payment.merchant_id,
+			payment.amount_minor,
+			payment.currency,
+			payment.captured_at,
+			payment.settlement_batch_id
+	`
+
+	rows, err := tx.Query(
+		ctx,
+		query,
+		input.WindowStart.UTC(),
+		input.WindowEnd.UTC(),
+		input.Limit,
+		input.BatchID,
+		input.Now.UTC(),
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	claimed := make([]settlement.ClaimedPayment, 0)
+	for rows.Next() {
+		payment, err := scanClaimedPayment(rows)
+		if err != nil {
+			return nil, err
+		}
+
+		claimed = append(claimed, payment)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return claimed, nil
+}
+
 func (s *Store) CreateLineItem(ctx context.Context, item settlement.LineItem) (settlement.LineItem, error) {
 	const query = `
 		INSERT INTO settlement_line_items (
@@ -302,6 +370,27 @@ func scanBatch(scanner batchScanner) (settlement.Batch, error) {
 
 type lineItemScanner interface {
 	Scan(dest ...any) error
+}
+
+type claimedPaymentScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanClaimedPayment(scanner claimedPaymentScanner) (settlement.ClaimedPayment, error) {
+	var payment settlement.ClaimedPayment
+
+	if err := scanner.Scan(
+		&payment.PaymentID,
+		&payment.MerchantID,
+		&payment.AmountMinor,
+		&payment.Currency,
+		&payment.CapturedAt,
+		&payment.SettlementBatch,
+	); err != nil {
+		return settlement.ClaimedPayment{}, err
+	}
+
+	return payment, nil
 }
 
 func scanLineItem(scanner lineItemScanner) (settlement.LineItem, error) {

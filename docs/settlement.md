@@ -9,6 +9,7 @@ This document explains the current PayCore settlement foundation as it exists to
 - Settlement batch entity in `internal/settlement/entity.go`.
 - Settlement line item entity in `internal/settlement/entity.go`.
 - Settlement repository interface in `internal/settlement/repository.go`.
+- Settlement service in `internal/settlement/service.go`.
 - PostgreSQL settlement repository adapter in `internal/settlement/adapters/postgres/repository.go`.
 - Settlement schema migration in `migrations/000006_create_settlements.sql`.
 - Settlement batch statuses:
@@ -31,20 +32,26 @@ This document explains the current PayCore settlement foundation as it exists to
   - unique `settlement_line_items.payment_id`
 - PostgreSQL adapter support for:
   - create/get/update batch
+  - claim captured payments
   - create line item
   - list line items
   - transaction context propagation
+- Service-level batch orchestration:
+  - create batch
+  - start processing
+  - claim captured payments
+  - create line items
+  - complete batch
 - Domain tests for batch lifecycle, stale locks, line item validation, and net amount calculation.
+- Service tests for batch creation and empty-batch completion.
 - PostgreSQL adapter integration tests.
 
 ### Not Implemented Yet
 
-- Settlement service or batch engine.
 - In-memory settlement repository adapter.
 - Settlement worker command.
 - `POST /settlement-batches`.
 - `GET /settlement-batches/{batch_id}`.
-- Captured-payment claim query.
 - Payment `SETTLED` transition wiring inside the settlement flow.
 - `payment.settled` outbox event creation.
 - Redis settlement coordination lock.
@@ -65,7 +72,7 @@ No settlement HTTP endpoints exist yet. When added, settlement endpoints should 
 
 Settlement is not wired into `cmd/paycore-api/main.go` yet.
 
-Current settlement code is domain and schema only:
+Current settlement code is not wired into a runtime command yet, but the service can be tested directly:
 
 ```text
 go test ./internal/settlement
@@ -78,6 +85,7 @@ internal/settlement
   |
   +--> entity.go
   +--> repository.go
+  +--> service.go
   +--> entity_test.go
   |
   +--> adapters/postgres/repository.go
@@ -91,9 +99,9 @@ The settlement package owns settlement batch and line item domain rules. Future 
 
 ## 3. Main Settlement Flow
 
-### Planned Service Input
+### Service Input
 
-No settlement service exists yet. The planned input will represent a settlement time window:
+The current service input represents a settlement time window:
 
 ```go
 settlement.CreateBatchInput{
@@ -102,16 +110,16 @@ settlement.CreateBatchInput{
 }
 ```
 
-### Planned Step-by-Step
+### Step-by-Step
 
-1. Worker or operator triggers settlement for a time window.
+1. Caller triggers settlement for a time window.
 2. Service creates a settlement batch in `CREATED`.
-3. Worker marks the batch `PROCESSING` with `claimed_by` and `locked_until`.
+3. Service marks the batch `PROCESSING` with `claimed_by` and `locked_until`.
 4. Repository claims eligible captured payments for the batch.
 5. Service creates settlement line items.
-6. Service marks claimed payments `SETTLED`.
-7. Service writes `payment.settled` outbox events.
-8. Service marks settlement batch `COMPLETED`.
+6. Service marks settlement batch `COMPLETED`.
+
+Payment `SETTLED` transition and `payment.settled` outbox events are planned for the next settlement milestone.
 
 ### Diagram
 
@@ -124,8 +132,6 @@ Settlement Service
   +--> create settlement batch
   +--> claim captured payments
   +--> create line items
-  +--> mark payments SETTLED
-  +--> write payment.settled outbox events
   +--> complete batch
 ```
 
@@ -240,7 +246,10 @@ Current tests cover:
 - stale lock detection
 - line item net amount calculation
 - line item amount validation
+- service creates completed batch with line items
+- service completes empty batch when no payments are claimed
 - Postgres batch create/get/update
+- Postgres captured-payment claim flow
 - Postgres line item create/list
 - duplicate batch mapping
 - duplicate line item mapping
@@ -270,6 +279,10 @@ Defines settlement batch and line item entities, status constants, lifecycle met
 
 Defines the repository interface and repository-level errors for future adapters.
 
+`internal/settlement/service.go`
+
+Creates settlement batches, starts processing, claims captured payments, creates line items, and completes the batch inside a transaction.
+
 `internal/settlement/adapters/postgres/repository.go`
 
 Persists settlement batches and line items in PostgreSQL and participates in context-propagated transactions.
@@ -286,8 +299,8 @@ Creates settlement batch and line item tables, adds `payments.settlement_batch_i
 - [x] Add settlement migration.
 - [x] Add domain tests.
 - [x] Add PostgreSQL settlement repository adapter.
-- [ ] Add settlement service.
-- [ ] Add captured-payment claim query.
+- [x] Add settlement service.
+- [x] Add captured-payment claim query.
 - [ ] Add payment `SETTLED` transition wiring.
 - [ ] Add `payment.settled` outbox event creation.
 - [ ] Add settlement worker command.
