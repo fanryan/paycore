@@ -160,6 +160,21 @@ go run ./cmd/paycore-outbox-worker
 
 Run migrations before starting the worker. The worker requires the `outbox_events` table from `migrations/000005_create_outbox_events.sql`.
 
+Run one settlement batch for the previous completed window:
+
+```bash
+PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=disable' \
+go run ./cmd/paycore-settlement-worker
+```
+
+Override the settlement window:
+
+```bash
+PAYCORE_SETTLEMENT_WINDOW_MINUTES=30 \
+PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=disable' \
+go run ./cmd/paycore-settlement-worker
+```
+
 The API listens on port `8080` by default.
 
 Override the address:
@@ -187,6 +202,10 @@ Supported local configuration:
 | `PAYCORE_RATE_LIMIT_WINDOW_SECONDS` | `60` | Fixed-window length in seconds |
 | `PAYCORE_IDEMPOTENCY_CACHE_ENABLED` | `false` | Enables Redis-backed idempotency response cache |
 | `PAYCORE_IDEMPOTENCY_CACHE_TTL_SECONDS` | `86400` | Redis idempotency response cache TTL in seconds |
+| `PAYCORE_SETTLEMENT_WORKER_ID` | `paycore-settlement-worker` | Worker id recorded on processing settlement batches |
+| `PAYCORE_SETTLEMENT_WINDOW_MINUTES` | `60` | Previous completed window size processed by settlement worker |
+| `PAYCORE_SETTLEMENT_CLAIM_LIMIT` | `100` | Maximum captured payments claimed per settlement batch |
+| `PAYCORE_SETTLEMENT_LOCK_MINUTES` | `5` | Processing lock TTL for settlement batch ownership |
 
 Test the current endpoints:
 
@@ -271,6 +290,12 @@ PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=
 PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=disable' go test ./internal/settlement
 ```
 
+To run settlement worker command tests:
+
+```bash
+go test ./cmd/paycore-settlement-worker
+```
+
 To run the settlement PostgreSQL adapter tests:
 
 ```bash
@@ -299,6 +324,9 @@ paycore/
       main_test.go
     paycore-outbox-worker/
       main.go
+    paycore-settlement-worker/
+      main.go
+      main_test.go
     paycore-migrate/
       main.go
   internal/

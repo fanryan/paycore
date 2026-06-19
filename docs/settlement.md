@@ -51,7 +51,7 @@ This document explains the current PayCore settlement foundation as it exists to
 ### Not Implemented Yet
 
 - In-memory settlement repository adapter.
-- Settlement worker command.
+- Looping settlement scheduler.
 - `POST /settlement-batches`.
 - `GET /settlement-batches/{batch_id}`.
 - Redis settlement coordination lock.
@@ -72,11 +72,14 @@ No settlement HTTP endpoints exist yet. When added, settlement endpoints should 
 
 Settlement is not wired into `cmd/paycore-api/main.go` yet.
 
-Current settlement code is not wired into a runtime command yet, but the service can be tested directly:
+Settlement can be run as a one-shot worker command:
 
-```text
-go test ./internal/settlement
+```bash
+PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=disable' \
+go run ./cmd/paycore-settlement-worker
 ```
+
+The worker processes the previous completed time window and exits. For example, at `11:37` with a 60-minute window, it settles `10:00` to `11:00`.
 
 ### Feature Package Boundary
 
@@ -253,6 +256,8 @@ Current tests cover:
 - service completes empty batch when no payments are claimed
 - service marks claimed payments settled
 - service writes `payment.settled` outbox events
+- settlement worker window calculation
+- settlement worker config parsing
 - Postgres service integration for settled payment and outbox event
 - Postgres batch create/get/update
 - Postgres captured-payment claim flow
@@ -265,6 +270,12 @@ Run:
 
 ```bash
 go test ./internal/settlement
+```
+
+Run settlement worker command tests:
+
+```bash
+go test ./cmd/paycore-settlement-worker
 ```
 
 Run PostgreSQL settlement service integration tests:
@@ -301,6 +312,10 @@ Creates settlement batches, starts processing, claims captured payments, creates
 
 Persists settlement batches and line items in PostgreSQL and participates in context-propagated transactions.
 
+`cmd/paycore-settlement-worker/main.go`
+
+Runs one settlement batch for the previous completed time window and exits.
+
 `migrations/000006_create_settlements.sql`
 
 Creates settlement batch and line item tables, adds `payments.settlement_batch_id`, and adds indexes/constraints for settlement processing.
@@ -317,7 +332,7 @@ Creates settlement batch and line item tables, adds `payments.settlement_batch_i
 - [x] Add captured-payment claim query.
 - [x] Add payment `SETTLED` transition wiring.
 - [x] Add `payment.settled` outbox event creation.
-- [ ] Add settlement worker command.
+- [x] Add settlement worker command.
 - [ ] Add settlement HTTP endpoints.
 - [ ] Add stale batch recovery tests.
 - [ ] Add settlement metrics.
