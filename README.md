@@ -48,6 +48,7 @@ Current development stage:
 - Payer balance reservation, release, and held-capture behavior implemented
 - Payment entity, authorization hold entity, repository interface, and in-memory adapter implemented
 - In-memory idempotency record, service, repository interface, and memory adapter implemented
+- Redis-backed idempotency response cache implemented as an optional replay acceleration layer
 - Payment authorization HTTP endpoint implemented with local in-memory `Idempotency-Key` enforcement
 - Payment capture service and HTTP endpoint implemented with local in-memory `Idempotency-Key` enforcement
 - Redis-backed fixed-window rate limiting implemented for payment mutation routes
@@ -77,9 +78,9 @@ POST /payments/authorize
 POST /payments/{payment_id}/capture
 ```
 
-Runtime wiring to PostgreSQL repositories is available through `PAYCORE_REPOSITORY_BACKEND=postgres`. Memory repositories remain the default. Redis-backed rate limiting and Kafka-backed outbox publishing are implemented but opt-in. Prometheus and settlement processing have not been implemented yet.
+Runtime wiring to PostgreSQL repositories is available through `PAYCORE_REPOSITORY_BACKEND=postgres`. Memory repositories remain the default. Redis-backed rate limiting, Redis-backed idempotency response caching, and Kafka-backed outbox publishing are implemented but opt-in. Prometheus and settlement processing have not been implemented yet.
 
-Payment authorization and capture enforce `Idempotency-Key`. In memory mode, idempotency records are process-local. In Postgres mode, merchant, payer, payment, hold, idempotency, and outbox records use PostgreSQL repositories. Payment authorization and capture business mutations plus outbox event creation run through a service-level transaction boundary in Postgres mode. Redis-backed rate limiting fails closed if Redis is unavailable.
+Payment authorization and capture enforce `Idempotency-Key`. In memory mode, idempotency records are process-local. In Postgres mode, merchant, payer, payment, hold, idempotency, and outbox records use PostgreSQL repositories. Payment authorization and capture business mutations plus outbox event creation run through a service-level transaction boundary in Postgres mode. Redis-backed rate limiting fails closed if Redis is unavailable. Redis-backed idempotency caching falls back to durable records if Redis is unavailable.
 
 ## Run Locally
 
@@ -123,6 +124,15 @@ Start the API server with Redis rate limiting enabled:
 ```bash
 docker compose up -d redis
 PAYCORE_RATE_LIMIT_ENABLED=true \
+PAYCORE_REDIS_ADDR=localhost:6379 \
+go run ./cmd/paycore-api
+```
+
+Start the API server with Redis idempotency response caching enabled:
+
+```bash
+docker compose up -d redis
+PAYCORE_IDEMPOTENCY_CACHE_ENABLED=true \
 PAYCORE_REDIS_ADDR=localhost:6379 \
 go run ./cmd/paycore-api
 ```
@@ -171,6 +181,8 @@ Supported local configuration:
 | `PAYCORE_RATE_LIMIT_ENABLED` | `false` | Enables Redis-backed rate limiting for payment mutation routes |
 | `PAYCORE_RATE_LIMIT_REQUESTS` | `60` | Fixed-window request limit per client key |
 | `PAYCORE_RATE_LIMIT_WINDOW_SECONDS` | `60` | Fixed-window length in seconds |
+| `PAYCORE_IDEMPOTENCY_CACHE_ENABLED` | `false` | Enables Redis-backed idempotency response cache |
+| `PAYCORE_IDEMPOTENCY_CACHE_TTL_SECONDS` | `86400` | Redis idempotency response cache TTL in seconds |
 
 Test the current endpoints:
 
@@ -232,6 +244,13 @@ To run the Redis rate limiter integration test:
 ```bash
 docker compose up -d redis
 PAYCORE_REDIS_ADDR=localhost:6379 go test ./internal/ratelimit/adapters/redis
+```
+
+To run the Redis idempotency cache integration test:
+
+```bash
+docker compose up -d redis
+PAYCORE_REDIS_ADDR=localhost:6379 go test ./internal/idempotency/adapters/redis
 ```
 
 To run the Postgres + Kafka outbox worker integration test:

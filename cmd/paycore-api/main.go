@@ -14,6 +14,7 @@ import (
 	"github.com/fanryan/paycore/internal/idempotency"
 	idempotencymemory "github.com/fanryan/paycore/internal/idempotency/adapters/memory"
 	idempotencypostgres "github.com/fanryan/paycore/internal/idempotency/adapters/postgres"
+	idempotencyredis "github.com/fanryan/paycore/internal/idempotency/adapters/redis"
 	"github.com/fanryan/paycore/internal/merchant"
 	merchantmemory "github.com/fanryan/paycore/internal/merchant/adapters/memory"
 	merchantpostgres "github.com/fanryan/paycore/internal/merchant/adapters/postgres"
@@ -67,6 +68,13 @@ func main() {
 	}
 	defer closeRateLimiter()
 
+	idempotencyCache, closeIdempotencyCache, err := newIdempotencyCache(context.Background(), cfg)
+	if err != nil {
+		logger.Error("failed to initialize idempotency cache", "error", err)
+		os.Exit(1)
+	}
+	defer closeIdempotencyCache()
+
 	merchantService := merchant.NewMerchantService(repositories.merchants)
 	merchantHandler := merchant.NewHandler(merchantService)
 
@@ -80,7 +88,7 @@ func main() {
 		repositories.transactor,
 		repositories.outbox,
 	)
-	idempotencyService := idempotency.NewService(repositories.idempotency, 24*time.Hour)
+	idempotencyService := idempotency.NewServiceWithCache(repositories.idempotency, idempotencyCache, 24*time.Hour)
 	paymentHandler := payment.NewHandlerWithIdempotency(paymentService, idempotencyService)
 
 	server := &http.Server{
@@ -110,6 +118,7 @@ func main() {
 			"read_header_timeout", cfg.HTTPReadHeaderTimeout.String(),
 			"shutdown_timeout", cfg.HTTPShutdownTimeout.String(),
 			"rate_limit_enabled", cfg.RateLimitEnabled,
+			"idempotency_cache_enabled", cfg.IdempotencyCacheEnabled,
 		)
 
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -207,6 +216,34 @@ func newRateLimiter(ctx context.Context, cfg config.Config) (ratelimit.Limiter, 
 	}
 
 	return limiter, func() {
+		_ = client.Close()
+	}, nil
+}
+
+func newIdempotencyCache(ctx context.Context, cfg config.Config) (idempotency.Cache, func(), error) {
+	if !cfg.IdempotencyCacheEnabled {
+		return idempotency.NoopCache{}, func() {}, nil
+	}
+
+	client := goredis.NewClient(&goredis.Options{
+		Addr: cfg.RedisAddr,
+	})
+
+	if err := client.Ping(ctx).Err(); err != nil {
+		_ = client.Close()
+		return nil, nil, fmt.Errorf("ping redis: %w", err)
+	}
+
+	cache, err := idempotencyredis.NewCache(idempotencyredis.Config{
+		Client: client,
+		TTL:    cfg.IdempotencyCacheTTL,
+	})
+	if err != nil {
+		_ = client.Close()
+		return nil, nil, err
+	}
+
+	return cache, func() {
 		_ = client.Close()
 	}, nil
 }

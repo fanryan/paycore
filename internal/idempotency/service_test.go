@@ -74,6 +74,95 @@ func TestServiceReplaysCompletedRequest(t *testing.T) {
 	}
 }
 
+func TestServiceReplaysCompletedRequestFromCache(t *testing.T) {
+	store := memory.NewStore()
+	cache := &fakeCache{}
+	service := idempotency.NewServiceWithCache(store, cache, time.Hour)
+	ctx := context.Background()
+
+	if _, err := service.StartRequest(ctx, idempotency.StartRequestInput{
+		Key:         "key-1",
+		RequestHash: "hash-1",
+	}); err != nil {
+		t.Fatalf("expected start to succeed, got error: %v", err)
+	}
+
+	if _, err := service.CompleteRequest(ctx, idempotency.CompleteRequestInput{
+		Key:          "key-1",
+		ResponseCode: 201,
+		ResponseBody: []byte(`{"payment_id":"pay_1"}`),
+	}); err != nil {
+		t.Fatalf("expected complete to succeed, got error: %v", err)
+	}
+
+	cache.getResponse = idempotency.CachedResponse{
+		Key:          "key-1",
+		RequestHash:  "hash-1",
+		ResponseCode: 202,
+		ResponseBody: []byte(`{"cached":true}`),
+	}
+
+	result, err := service.StartRequest(ctx, idempotency.StartRequestInput{
+		Key:         "key-1",
+		RequestHash: "hash-1",
+	})
+	if err != nil {
+		t.Fatalf("expected replay start to succeed, got error: %v", err)
+	}
+
+	if !result.Replay {
+		t.Fatal("expected completed request to replay")
+	}
+
+	if result.ResponseCode != 202 {
+		t.Fatalf("expected cached response code 202, got %d", result.ResponseCode)
+	}
+
+	if string(result.ResponseBody) != `{"cached":true}` {
+		t.Fatalf("expected cached response body, got %s", result.ResponseBody)
+	}
+}
+
+func TestServiceFallsBackToRepositoryWhenCacheMisses(t *testing.T) {
+	store := memory.NewStore()
+	cache := &fakeCache{
+		getErr: idempotency.ErrCachedResponseNotFound,
+	}
+	service := idempotency.NewServiceWithCache(store, cache, time.Hour)
+	ctx := context.Background()
+
+	if _, err := service.StartRequest(ctx, idempotency.StartRequestInput{
+		Key:         "key-1",
+		RequestHash: "hash-1",
+	}); err != nil {
+		t.Fatalf("expected start to succeed, got error: %v", err)
+	}
+
+	if _, err := service.CompleteRequest(ctx, idempotency.CompleteRequestInput{
+		Key:          "key-1",
+		ResponseCode: 201,
+		ResponseBody: []byte(`{"payment_id":"pay_1"}`),
+	}); err != nil {
+		t.Fatalf("expected complete to succeed, got error: %v", err)
+	}
+
+	result, err := service.StartRequest(ctx, idempotency.StartRequestInput{
+		Key:         "key-1",
+		RequestHash: "hash-1",
+	})
+	if err != nil {
+		t.Fatalf("expected replay start to succeed, got error: %v", err)
+	}
+
+	if result.ResponseCode != 201 {
+		t.Fatalf("expected durable response code 201, got %d", result.ResponseCode)
+	}
+
+	if string(result.ResponseBody) != `{"payment_id":"pay_1"}` {
+		t.Fatalf("expected durable response body, got %s", result.ResponseBody)
+	}
+}
+
 func TestServiceRejectsDuplicateInProgressRequest(t *testing.T) {
 	service := newService()
 	ctx := context.Background()
@@ -171,6 +260,71 @@ func TestServiceCompletesRequest(t *testing.T) {
 	}
 }
 
+func TestServiceStoresCompletedResponseInCache(t *testing.T) {
+	cache := &fakeCache{}
+	service := idempotency.NewServiceWithCache(memory.NewStore(), cache, time.Hour)
+	ctx := context.Background()
+
+	if _, err := service.StartRequest(ctx, idempotency.StartRequestInput{
+		Key:         "key-1",
+		RequestHash: "hash-1",
+	}); err != nil {
+		t.Fatalf("expected start to succeed, got error: %v", err)
+	}
+
+	if _, err := service.CompleteRequest(ctx, idempotency.CompleteRequestInput{
+		Key:          "key-1",
+		ResponseCode: 201,
+		ResponseBody: []byte(`{"ok":true}`),
+	}); err != nil {
+		t.Fatalf("expected complete to succeed, got error: %v", err)
+	}
+
+	if cache.setResponse.Key != "key-1" {
+		t.Fatalf("expected cache key key-1, got %q", cache.setResponse.Key)
+	}
+
+	if cache.setResponse.RequestHash != "hash-1" {
+		t.Fatalf("expected cache request hash hash-1, got %q", cache.setResponse.RequestHash)
+	}
+
+	if cache.setResponse.ResponseCode != 201 {
+		t.Fatalf("expected cache response code 201, got %d", cache.setResponse.ResponseCode)
+	}
+
+	if string(cache.setResponse.ResponseBody) != `{"ok":true}` {
+		t.Fatalf("expected cache response body, got %s", cache.setResponse.ResponseBody)
+	}
+
+	if cache.setTTL <= 0 {
+		t.Fatalf("expected positive cache ttl, got %s", cache.setTTL)
+	}
+}
+
+func TestServiceIgnoresCacheWriteErrors(t *testing.T) {
+	cache := &fakeCache{
+		setErr: errors.New("redis unavailable"),
+	}
+	service := idempotency.NewServiceWithCache(memory.NewStore(), cache, time.Hour)
+	ctx := context.Background()
+
+	if _, err := service.StartRequest(ctx, idempotency.StartRequestInput{
+		Key:         "key-1",
+		RequestHash: "hash-1",
+	}); err != nil {
+		t.Fatalf("expected start to succeed, got error: %v", err)
+	}
+
+	_, err := service.CompleteRequest(ctx, idempotency.CompleteRequestInput{
+		Key:          "key-1",
+		ResponseCode: 201,
+		ResponseBody: []byte(`{"ok":true}`),
+	})
+	if err != nil {
+		t.Fatalf("expected complete to ignore cache error, got %v", err)
+	}
+}
+
 func TestServiceRejectsCompleteForMissingRequest(t *testing.T) {
 	service := newService()
 
@@ -186,4 +340,35 @@ func TestServiceRejectsCompleteForMissingRequest(t *testing.T) {
 
 func newService() *idempotency.Service {
 	return idempotency.NewService(memory.NewStore(), time.Hour)
+}
+
+type fakeCache struct {
+	getResponse idempotency.CachedResponse
+	getErr      error
+	setResponse idempotency.CachedResponse
+	setTTL      time.Duration
+	setErr      error
+}
+
+func (c *fakeCache) GetResponse(ctx context.Context, key string, requestHash string) (idempotency.CachedResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return idempotency.CachedResponse{}, err
+	}
+
+	if c.getErr != nil {
+		return idempotency.CachedResponse{}, c.getErr
+	}
+
+	return c.getResponse, nil
+}
+
+func (c *fakeCache) SetResponse(ctx context.Context, response idempotency.CachedResponse, ttl time.Duration) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	c.setResponse = response
+	c.setTTL = ttl
+
+	return c.setErr
 }

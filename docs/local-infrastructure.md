@@ -20,6 +20,7 @@ The repository currently provides Docker Compose services for:
 - Kafka outbox topic configuration loading through `PAYCORE_KAFKA_OUTBOX_TOPIC`.
 - Outbox publisher selection through `PAYCORE_OUTBOX_PUBLISHER`.
 - Redis rate-limit configuration through `PAYCORE_RATE_LIMIT_ENABLED`, `PAYCORE_RATE_LIMIT_REQUESTS`, and `PAYCORE_RATE_LIMIT_WINDOW_SECONDS`.
+- Redis idempotency cache configuration through `PAYCORE_IDEMPOTENCY_CACHE_ENABLED` and `PAYCORE_IDEMPOTENCY_CACHE_TTL_SECONDS`.
 
 Current services:
 
@@ -34,7 +35,6 @@ paycore-kafka
 These are planned but not currently implemented:
 
 - PostgreSQL settlement migrations.
-- Redis idempotency response cache.
 - Prometheus and Grafana.
 - Dockerized PayCore API service.
 
@@ -66,7 +66,7 @@ Redis is planned for:
 - idempotency response caching
 - fast admission-control checks
 
-Redis-backed rate limiting is implemented for payment mutation routes when `PAYCORE_RATE_LIMIT_ENABLED=true`. Correctness must not depend on Redis durability. PostgreSQL remains authoritative for durable payment, balance, idempotency, settlement, and outbox state.
+Redis-backed rate limiting is implemented for payment mutation routes when `PAYCORE_RATE_LIMIT_ENABLED=true`. Redis-backed idempotency response caching is implemented when `PAYCORE_IDEMPOTENCY_CACHE_ENABLED=true`. Correctness must not depend on Redis durability. PostgreSQL remains authoritative for durable payment, balance, idempotency, settlement, and outbox state.
 
 ### Kafka
 
@@ -127,7 +127,7 @@ idempotency postgres repository
 outbox postgres repository
 ```
 
-Redis and Kafka are available in Docker Compose. The API can use Redis-backed rate limiting when explicitly configured. Redis-backed idempotency response caching is not implemented yet. The outbox worker can publish to Kafka when explicitly configured.
+Redis and Kafka are available in Docker Compose. The API can use Redis-backed rate limiting and Redis-backed idempotency response caching when explicitly configured. The outbox worker can publish to Kafka when explicitly configured.
 
 ## 5. Configuration
 
@@ -147,9 +147,11 @@ PAYCORE_OUTBOX_PUBLISHER=logging
 PAYCORE_RATE_LIMIT_ENABLED=false
 PAYCORE_RATE_LIMIT_REQUESTS=60
 PAYCORE_RATE_LIMIT_WINDOW_SECONDS=60
+PAYCORE_IDEMPOTENCY_CACHE_ENABLED=false
+PAYCORE_IDEMPOTENCY_CACHE_TTL_SECONDS=86400
 ```
 
-The app currently loads the database URL, Redis address, Kafka brokers, Kafka outbox topic, outbox publisher backend, rate-limit settings, and repository backend into shared configuration.
+The app currently loads the database URL, Redis address, Kafka brokers, Kafka outbox topic, outbox publisher backend, rate-limit settings, idempotency cache settings, and repository backend into shared configuration.
 
 The API can run with PostgreSQL repositories when started with:
 
@@ -159,7 +161,7 @@ PAYCORE_DATABASE_URL=postgres://paycore:paycore@localhost:5432/paycore?sslmode=d
 go run ./cmd/paycore-api
 ```
 
-Redis is available in Docker Compose. Redis-backed rate limiting is implemented for payment mutation routes when enabled. Redis-backed idempotency response caching is not implemented yet.
+Redis is available in Docker Compose. Redis-backed rate limiting is implemented for payment mutation routes when enabled. Redis-backed idempotency response caching is implemented for completed response replay when enabled.
 
 Kafka is available in Docker Compose. Kafka-backed outbox publishing is implemented behind `PAYCORE_OUTBOX_PUBLISHER=kafka`, while `logging` remains the default local worker mode.
 
@@ -173,7 +175,7 @@ Existing tests use in-memory repositories and can run with:
 go test ./...
 ```
 
-PostgreSQL repository adapter tests and the API Postgres smoke test run against local PostgreSQL when `PAYCORE_DATABASE_URL` is set. Redis rate-limit adapter tests run against local Redis when `PAYCORE_REDIS_ADDR` is set. Kafka publisher integration tests run against local Kafka when `PAYCORE_KAFKA_BROKERS` is set.
+PostgreSQL repository adapter tests and the API Postgres smoke test run against local PostgreSQL when `PAYCORE_DATABASE_URL` is set. Redis rate-limit and idempotency-cache adapter tests run against local Redis when `PAYCORE_REDIS_ADDR` is set. Kafka publisher integration tests run against local Kafka when `PAYCORE_KAFKA_BROKERS` is set.
 
 Schema migrations are plain SQL and are applied by the local `paycore-migrate` command.
 
@@ -214,6 +216,7 @@ Applies local PostgreSQL migrations and records applied files in `schema_migrati
 - [x] Add Kafka outbox topic config loading.
 - [x] Add outbox publisher backend config loading.
 - [x] Add Redis rate-limit config loading.
+- [x] Add Redis idempotency cache config loading.
 - [x] Add PostgreSQL merchant and payer migrations.
 - [x] Add PostgreSQL payment and idempotency migrations.
 - [x] Add migration runner.
@@ -222,5 +225,5 @@ Applies local PostgreSQL migrations and records applied files in `schema_migrati
 - [x] Add Kafka service.
 - [x] Add Kafka-backed outbox publisher.
 - [x] Add Redis rate limiter.
-- [ ] Add Redis idempotency response cache.
+- [x] Add Redis idempotency response cache.
 - [ ] Add Prometheus and Grafana services.

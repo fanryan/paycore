@@ -12,6 +12,7 @@ var (
 
 type Service struct {
 	repository Repository
+	cache      Cache
 	now        func() time.Time
 	ttl        time.Duration
 }
@@ -35,12 +36,21 @@ type CompleteRequestInput struct {
 }
 
 func NewService(repository Repository, ttl time.Duration) *Service {
+	return NewServiceWithCache(repository, NoopCache{}, ttl)
+}
+
+func NewServiceWithCache(repository Repository, cache Cache, ttl time.Duration) *Service {
 	if ttl <= 0 {
 		ttl = 24 * time.Hour
 	}
 
+	if cache == nil {
+		cache = NoopCache{}
+	}
+
 	return &Service{
 		repository: repository,
+		cache:      cache,
 		now:        time.Now,
 		ttl:        ttl,
 	}
@@ -92,6 +102,16 @@ func (s *Service) StartRequest(ctx context.Context, input StartRequestInput) (St
 		return StartRequestResult{}, ErrInvalidStatus
 	}
 
+	cached, err := s.cache.GetResponse(ctx, existing.Key, existing.RequestHash)
+	if err == nil {
+		return StartRequestResult{
+			Record:       existing,
+			Replay:       true,
+			ResponseCode: cached.ResponseCode,
+			ResponseBody: append([]byte(nil), cached.ResponseBody...),
+		}, nil
+	}
+
 	return StartRequestResult{
 		Record:       existing,
 		Replay:       true,
@@ -106,10 +126,29 @@ func (s *Service) CompleteRequest(ctx context.Context, input CompleteRequestInpu
 		return Record{}, err
 	}
 
-	completed, err := existing.Complete(input.ResponseCode, input.ResponseBody, s.now().UTC())
+	now := s.now().UTC()
+
+	completed, err := existing.Complete(input.ResponseCode, input.ResponseBody, now)
 	if err != nil {
 		return Record{}, err
 	}
 
-	return s.repository.UpdateRecord(ctx, completed)
+	updated, err := s.repository.UpdateRecord(ctx, completed)
+	if err != nil {
+		return Record{}, err
+	}
+
+	cacheTTL := updated.ExpiresAt.Sub(now)
+	if cacheTTL <= 0 {
+		cacheTTL = s.ttl
+	}
+
+	_ = s.cache.SetResponse(ctx, CachedResponse{
+		Key:          updated.Key,
+		RequestHash:  updated.RequestHash,
+		ResponseCode: updated.ResponseCode,
+		ResponseBody: append([]byte(nil), updated.ResponseBody...),
+	}, cacheTTL)
+
+	return updated, nil
 }

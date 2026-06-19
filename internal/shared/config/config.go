@@ -7,36 +7,40 @@ import (
 )
 
 type Config struct {
-	Env                   string
-	HTTPAddr              string
-	HTTPReadHeaderTimeout time.Duration
-	HTTPShutdownTimeout   time.Duration
-	DatabaseURL           string
-	RedisAddr             string
-	KafkaBrokers          string
-	KafkaOutboxTopic      string
-	OutboxPublisher       string
-	RateLimitEnabled      bool
-	RateLimitRequests     int64
-	RateLimitWindow       time.Duration
-	RepositoryBackend     string
+	Env                     string
+	HTTPAddr                string
+	HTTPReadHeaderTimeout   time.Duration
+	HTTPShutdownTimeout     time.Duration
+	DatabaseURL             string
+	RedisAddr               string
+	KafkaBrokers            string
+	KafkaOutboxTopic        string
+	OutboxPublisher         string
+	RateLimitEnabled        bool
+	RateLimitRequests       int64
+	RateLimitWindow         time.Duration
+	IdempotencyCacheEnabled bool
+	IdempotencyCacheTTL     time.Duration
+	RepositoryBackend       string
 }
 
 func Load() Config {
 	return Config{
-		Env:                   getenv("PAYCORE_ENV", "local"),
-		HTTPAddr:              getenv("PAYCORE_HTTP_ADDR", ":8080"),
-		HTTPReadHeaderTimeout: durationSeconds("PAYCORE_HTTP_READ_HEADER_TIMEOUT_SECONDS", 5*time.Second),
-		HTTPShutdownTimeout:   durationSeconds("PAYCORE_HTTP_SHUTDOWN_TIMEOUT_SECONDS", 10*time.Second),
-		DatabaseURL:           getenv("PAYCORE_DATABASE_URL", ""),
-		RedisAddr:             getenv("PAYCORE_REDIS_ADDR", "localhost:6379"),
-		KafkaBrokers:          getenv("PAYCORE_KAFKA_BROKERS", "localhost:9092"),
-		KafkaOutboxTopic:      getenv("PAYCORE_KAFKA_OUTBOX_TOPIC", "paycore.outbox.events"),
-		OutboxPublisher:       getenv("PAYCORE_OUTBOX_PUBLISHER", "logging"),
-		RateLimitEnabled:      boolenv("PAYCORE_RATE_LIMIT_ENABLED", false),
-		RateLimitRequests:     int64env("PAYCORE_RATE_LIMIT_REQUESTS", 60),
-		RateLimitWindow:       durationSeconds("PAYCORE_RATE_LIMIT_WINDOW_SECONDS", time.Minute),
-		RepositoryBackend:     getenv("PAYCORE_REPOSITORY_BACKEND", "memory"),
+		Env:                     getenv("PAYCORE_ENV", "local"),
+		HTTPAddr:                getenv("PAYCORE_HTTP_ADDR", ":8080"),
+		HTTPReadHeaderTimeout:   durationSeconds("PAYCORE_HTTP_READ_HEADER_TIMEOUT_SECONDS", 5*time.Second),
+		HTTPShutdownTimeout:     durationSeconds("PAYCORE_HTTP_SHUTDOWN_TIMEOUT_SECONDS", 10*time.Second),
+		DatabaseURL:             getenv("PAYCORE_DATABASE_URL", ""),
+		RedisAddr:               getenv("PAYCORE_REDIS_ADDR", "localhost:6379"),
+		KafkaBrokers:            getenv("PAYCORE_KAFKA_BROKERS", "localhost:9092"),
+		KafkaOutboxTopic:        getenv("PAYCORE_KAFKA_OUTBOX_TOPIC", "paycore.outbox.events"),
+		OutboxPublisher:         getenv("PAYCORE_OUTBOX_PUBLISHER", "logging"),
+		RateLimitEnabled:        boolenv("PAYCORE_RATE_LIMIT_ENABLED", false),
+		RateLimitRequests:       int64env("PAYCORE_RATE_LIMIT_REQUESTS", 60),
+		RateLimitWindow:         durationSeconds("PAYCORE_RATE_LIMIT_WINDOW_SECONDS", time.Minute),
+		IdempotencyCacheEnabled: boolenv("PAYCORE_IDEMPOTENCY_CACHE_ENABLED", false),
+		IdempotencyCacheTTL:     durationSeconds("PAYCORE_IDEMPOTENCY_CACHE_TTL_SECONDS", 24*time.Hour),
+		RepositoryBackend:       getenv("PAYCORE_REPOSITORY_BACKEND", "memory"),
 	}
 }
 

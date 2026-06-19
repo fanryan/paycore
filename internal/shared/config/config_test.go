@@ -18,6 +18,8 @@ func TestLoadUsesDefaults(t *testing.T) {
 	t.Setenv("PAYCORE_RATE_LIMIT_ENABLED", "")
 	t.Setenv("PAYCORE_RATE_LIMIT_REQUESTS", "")
 	t.Setenv("PAYCORE_RATE_LIMIT_WINDOW_SECONDS", "")
+	t.Setenv("PAYCORE_IDEMPOTENCY_CACHE_ENABLED", "")
+	t.Setenv("PAYCORE_IDEMPOTENCY_CACHE_TTL_SECONDS", "")
 	t.Setenv("PAYCORE_REPOSITORY_BACKEND", "")
 
 	cfg := Load()
@@ -70,6 +72,14 @@ func TestLoadUsesDefaults(t *testing.T) {
 		t.Fatalf("expected rate limit window 1m, got %s", cfg.RateLimitWindow)
 	}
 
+	if cfg.IdempotencyCacheEnabled {
+		t.Fatal("expected idempotency cache disabled by default")
+	}
+
+	if cfg.IdempotencyCacheTTL != 24*time.Hour {
+		t.Fatalf("expected idempotency cache ttl 24h, got %s", cfg.IdempotencyCacheTTL)
+	}
+
 	if cfg.RepositoryBackend != "memory" {
 		t.Fatalf("expected repository backend memory, got %q", cfg.RepositoryBackend)
 	}
@@ -88,6 +98,8 @@ func TestLoadUsesEnvironmentOverrides(t *testing.T) {
 	t.Setenv("PAYCORE_RATE_LIMIT_ENABLED", "true")
 	t.Setenv("PAYCORE_RATE_LIMIT_REQUESTS", "42")
 	t.Setenv("PAYCORE_RATE_LIMIT_WINDOW_SECONDS", "30")
+	t.Setenv("PAYCORE_IDEMPOTENCY_CACHE_ENABLED", "true")
+	t.Setenv("PAYCORE_IDEMPOTENCY_CACHE_TTL_SECONDS", "3600")
 	t.Setenv("PAYCORE_REPOSITORY_BACKEND", "postgres")
 
 	cfg := Load()
@@ -140,6 +152,14 @@ func TestLoadUsesEnvironmentOverrides(t *testing.T) {
 		t.Fatalf("expected rate limit window 30s, got %s", cfg.RateLimitWindow)
 	}
 
+	if !cfg.IdempotencyCacheEnabled {
+		t.Fatal("expected idempotency cache enabled")
+	}
+
+	if cfg.IdempotencyCacheTTL != time.Hour {
+		t.Fatalf("expected idempotency cache ttl 1h, got %s", cfg.IdempotencyCacheTTL)
+	}
+
 	if cfg.RepositoryBackend != "postgres" {
 		t.Fatalf("expected repository backend postgres, got %q", cfg.RepositoryBackend)
 	}
@@ -149,6 +169,7 @@ func TestLoadFallsBackForInvalidDurations(t *testing.T) {
 	t.Setenv("PAYCORE_HTTP_READ_HEADER_TIMEOUT_SECONDS", "not-a-number")
 	t.Setenv("PAYCORE_HTTP_SHUTDOWN_TIMEOUT_SECONDS", "-1")
 	t.Setenv("PAYCORE_RATE_LIMIT_WINDOW_SECONDS", "0")
+	t.Setenv("PAYCORE_IDEMPOTENCY_CACHE_TTL_SECONDS", "-5")
 
 	cfg := Load()
 
@@ -162,6 +183,10 @@ func TestLoadFallsBackForInvalidDurations(t *testing.T) {
 
 	if cfg.RateLimitWindow != time.Minute {
 		t.Fatalf("expected rate limit window fallback 1m, got %s", cfg.RateLimitWindow)
+	}
+
+	if cfg.IdempotencyCacheTTL != 24*time.Hour {
+		t.Fatalf("expected idempotency cache ttl fallback 24h, got %s", cfg.IdempotencyCacheTTL)
 	}
 }
 

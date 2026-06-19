@@ -1,18 +1,20 @@
 # Idempotency
 
-This document explains the current PayCore idempotency implementation as it exists today. It is written for resume and interview preparation, so it focuses on how the code works, what decisions were made, what is intentionally still in-memory, and what is planned next.
+This document explains the current PayCore idempotency implementation as it exists today. It is written for resume and interview preparation, so it focuses on how the code works, what decisions were made, what is durable, what Redis accelerates, and what is planned next.
 
 ## 1. Current Idempotency Scope
 
 ### Implemented
 
-The Go API currently supports a local idempotency foundation:
+The Go API currently supports durable idempotency records with optional Redis response caching:
 
 - Idempotency record entity in `internal/idempotency/record.go`.
 - Idempotency repository interface in `internal/idempotency/repository.go`.
+- Idempotency cache interface in `internal/idempotency/cache.go`.
 - Idempotency service in `internal/idempotency/service.go`.
 - In-memory idempotency repository adapter in `internal/idempotency/adapters/memory/repository.go`.
 - PostgreSQL idempotency repository adapter in `internal/idempotency/adapters/postgres/repository.go`.
+- Redis idempotency response cache adapter in `internal/idempotency/adapters/redis/cache.go`.
 - Request hashing with SHA-256 over HTTP method, URL path, and request body.
 - Idempotency statuses:
   - `IN_PROGRESS`
@@ -27,15 +29,14 @@ The Go API currently supports a local idempotency foundation:
 - Payment authorization integration for `POST /payments/authorize`.
 - Payment capture integration for `POST /payments/{payment_id}/capture`.
 - Handler-level response recording for successful replay.
+- API runtime wiring to PostgreSQL idempotency records through `PAYCORE_REPOSITORY_BACKEND=postgres`.
+- Optional Redis response caching through `PAYCORE_IDEMPOTENCY_CACHE_ENABLED=true`.
 - Unit tests for record behavior, memory repository behavior, service behavior, payment handler behavior, and router behavior.
 
 ### Not Implemented Yet
 
 These are planned but not currently implemented:
 
-- PostgreSQL durable idempotency records.
-- Runtime wiring from the API to the PostgreSQL idempotency repository.
-- Redis idempotency response cache.
 - Request hash canonicalization beyond raw request body hashing.
 - Durable recovery for `IN_PROGRESS` records after process crash.
 - Failed response persistence policy.
@@ -70,7 +71,16 @@ go run ./cmd/paycore-api
 the current application creates:
 
 ```text
-idempotency memory repository
+idempotency repository
+  |
+  +--> memory adapter by default
+  +--> PostgreSQL adapter when PAYCORE_REPOSITORY_BACKEND=postgres
+  |
+  v
+idempotency cache
+  |
+  +--> no-op cache by default
+  +--> Redis cache when PAYCORE_IDEMPOTENCY_CACHE_ENABLED=true
   |
   v
 idempotency service
@@ -79,7 +89,7 @@ idempotency service
 payment handler with idempotency
 ```
 
-The idempotency repository is in-memory and resets when the process restarts.
+Memory mode resets when the process restarts. PostgreSQL mode persists idempotency records across restarts. Redis cache is an optimization only; correctness falls back to durable records.
 
 ### Package Boundary
 
@@ -90,9 +100,12 @@ internal/idempotency
   |
   +--> record.go
   +--> repository.go
+  +--> cache.go
   +--> service.go
   |
   +--> adapters/memory/repository.go
+  +--> adapters/postgres/repository.go
+  +--> adapters/redis/cache.go
 ```
 
 The payment handler depends on the idempotency service, but payment business rules remain inside the payment service.
@@ -126,8 +139,10 @@ Idempotency-Key: demo-key-1
 6. Payment handler continues to authorize the payment.
 7. Payment handler records the final HTTP status and response body.
 8. Idempotency service marks the record `COMPLETED`.
-9. A later request with the same key and same request hash returns the stored response.
-10. A later request with the same key and different request hash returns `409`.
+9. A later request with the same key and same request hash tries Redis response cache first.
+10. If Redis has the response, PayCore replays it directly.
+11. If Redis misses or errors, PayCore falls back to the durable idempotency record.
+12. A later request with the same key and different request hash returns `409`.
 
 ### Diagram
 
@@ -144,7 +159,8 @@ payment.Handler
   +--> IdempotencyService.StartRequest
   |       |
   |       +--> CreateRecord
-  |       +--> or replay completed response
+  |       +--> or replay cached completed response
+  |       +--> or replay durable completed response
   |       +--> or reject key conflict
   |
   +--> Payment Service
@@ -176,8 +192,9 @@ Idempotency-Key: capture-key-1
 6. Payment handler continues to capture the payment.
 7. Payment handler records the final HTTP status and response body.
 8. Idempotency service marks the record `COMPLETED`.
-9. A later request with the same key and same payment path returns the stored response.
-10. A later request with the same key and a different payment path returns `409`.
+9. A later request with the same key and same payment path tries Redis response cache first.
+10. If Redis misses or errors, PayCore falls back to the durable idempotency record.
+11. A later request with the same key and a different payment path returns `409`.
 
 ### Diagram
 
@@ -194,7 +211,8 @@ payment.Handler
   +--> IdempotencyService.StartRequest
   |       |
   |       +--> CreateRecord
-  |       +--> or replay completed response
+  |       +--> or replay cached completed response
+  |       +--> or replay durable completed response
   |       +--> or reject key conflict
   |
   +--> Payment Service
@@ -230,6 +248,8 @@ same key still in progress    -> HTTP 409
 invalid idempotency input     -> HTTP 400
 ```
 
+Redis cache failures are intentionally not mapped to HTTP errors. If Redis response caching is unavailable, PayCore falls back to durable idempotency records and continues.
+
 ## 6. Persistence
 
 ### Current In-Memory Adapter
@@ -244,11 +264,11 @@ It uses a mutex for concurrent map access and checks `context.Context` before wo
 
 This adapter is useful for local API behavior and tests. It is not durable. Restarting the API loses idempotency history.
 
-### Planned PostgreSQL Records
+### PostgreSQL Records
 
-PostgreSQL persistence is planned but not implemented.
+PostgreSQL persistence is implemented and used when `PAYCORE_REPOSITORY_BACKEND=postgres`.
 
-Planned durable fields:
+Durable fields:
 
 - idempotency key
 - request hash
@@ -259,13 +279,26 @@ Planned durable fields:
 - updated timestamp
 - expiry timestamp
 
-The durable PostgreSQL implementation must participate in the same transaction as payment state, payer balance mutation, and outbox event creation.
+PostgreSQL is the source of truth for idempotency correctness. Redis cache entries may disappear without corrupting payment behavior.
 
-### Planned Redis Cache
+### Redis Cache
 
-Redis response caching is planned but not implemented.
+Redis response caching is implemented and opt-in through:
 
-Redis may replay completed responses faster, but PostgreSQL remains authoritative. If Redis is unavailable for idempotency response caching, PayCore should fall back to PostgreSQL records.
+```bash
+PAYCORE_IDEMPOTENCY_CACHE_ENABLED=true
+PAYCORE_IDEMPOTENCY_CACHE_TTL_SECONDS=86400
+```
+
+Redis stores completed responses by idempotency key and request hash.
+
+Current key shape:
+
+```text
+paycore:idempotency:response:<idempotency-key>:<request-hash>
+```
+
+If Redis is unavailable for idempotency response caching, PayCore falls back to PostgreSQL records.
 
 ## 7. Tests
 
@@ -284,6 +317,11 @@ Current tests cover:
 - context cancellation behavior
 - service start and complete behavior
 - completed response replay
+- cached response replay
+- durable response replay when cache misses
+- cache write errors ignored for correctness
+- Redis cache set/get behavior
+- Redis cache missing response behavior
 - key conflict rejection
 - in-progress duplicate rejection
 - expired key rejection
@@ -310,13 +348,25 @@ Defines `Record`, statuses, record construction, completion, expiry checks, and 
 
 Defines the idempotency repository interface and repository-level errors.
 
+`internal/idempotency/cache.go`
+
+Defines the idempotency response cache interface, cached response shape, no-op cache, and cache-miss error.
+
 `internal/idempotency/service.go`
 
-Coordinates starting idempotent requests, replaying completed responses, rejecting conflicts, and completing records.
+Coordinates starting idempotent requests, replaying cached or durable completed responses, rejecting conflicts, completing records, and writing cache entries after completion.
 
 `internal/idempotency/adapters/memory/repository.go`
 
 Provides the current non-durable in-memory idempotency repository implementation.
+
+`internal/idempotency/adapters/postgres/repository.go`
+
+Provides the durable PostgreSQL idempotency repository implementation.
+
+`internal/idempotency/adapters/redis/cache.go`
+
+Provides the Redis response cache implementation.
 
 `internal/payment/response_recorder.go`
 
@@ -335,5 +385,5 @@ Captures response status and body for payment authorization and capture replay.
 - [x] Add PostgreSQL idempotency record migration.
 - [x] Add PostgreSQL durable idempotency repository.
 - [x] Wire API runtime to PostgreSQL idempotency repository.
-- [ ] Add Redis idempotency response cache.
+- [x] Add Redis idempotency response cache.
 - [ ] Add idempotency metrics.
