@@ -54,6 +54,7 @@ Current development stage:
 - Redis-backed fixed-window rate limiting implemented for payment mutation routes
 - Settlement batch and line item domain foundation implemented
 - Settlement schema migration added with double-settlement guards
+- PostgreSQL settlement repository adapter implemented
 - Shared currency normalization and validation implemented
 - Shared random id helper implemented
 - Central HTTP router migrated to chi for path parameters and feature route composition
@@ -261,6 +262,14 @@ To run the settlement domain tests:
 go test ./internal/settlement
 ```
 
+To run the settlement PostgreSQL adapter tests:
+
+```bash
+docker compose up -d postgres
+PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=disable' go run ./cmd/paycore-migrate
+PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=disable' go test ./internal/settlement/adapters/postgres
+```
+
 To run the Postgres + Kafka outbox worker integration test:
 
 ```bash
@@ -360,6 +369,10 @@ paycore/
       entity.go
       entity_test.go
       repository.go
+      adapters/
+        postgres/
+          repository.go
+          repository_test.go
     shared/
       config/
         config.go

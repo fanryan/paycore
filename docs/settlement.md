@@ -9,6 +9,7 @@ This document explains the current PayCore settlement foundation as it exists to
 - Settlement batch entity in `internal/settlement/entity.go`.
 - Settlement line item entity in `internal/settlement/entity.go`.
 - Settlement repository interface in `internal/settlement/repository.go`.
+- PostgreSQL settlement repository adapter in `internal/settlement/adapters/postgres/repository.go`.
 - Settlement schema migration in `migrations/000006_create_settlements.sql`.
 - Settlement batch statuses:
   - `CREATED`
@@ -28,13 +29,18 @@ This document explains the current PayCore settlement foundation as it exists to
 - Migration-level double-settlement guard:
   - `payments.settlement_batch_id`
   - unique `settlement_line_items.payment_id`
+- PostgreSQL adapter support for:
+  - create/get/update batch
+  - create line item
+  - list line items
+  - transaction context propagation
 - Domain tests for batch lifecycle, stale locks, line item validation, and net amount calculation.
+- PostgreSQL adapter integration tests.
 
 ### Not Implemented Yet
 
 - Settlement service or batch engine.
 - In-memory settlement repository adapter.
-- PostgreSQL settlement repository adapter.
 - Settlement worker command.
 - `POST /settlement-batches`.
 - `GET /settlement-batches/{batch_id}`.
@@ -73,6 +79,8 @@ internal/settlement
   +--> entity.go
   +--> repository.go
   +--> entity_test.go
+  |
+  +--> adapters/postgres/repository.go
 
 migrations/
   |
@@ -232,11 +240,24 @@ Current tests cover:
 - stale lock detection
 - line item net amount calculation
 - line item amount validation
+- Postgres batch create/get/update
+- Postgres line item create/list
+- duplicate batch mapping
+- duplicate line item mapping
+- transaction rollback through context propagation
 
 Run:
 
 ```bash
 go test ./internal/settlement
+```
+
+Run PostgreSQL adapter tests:
+
+```bash
+docker compose up -d postgres
+PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=disable' go run ./cmd/paycore-migrate
+PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=disable' go test ./internal/settlement/adapters/postgres
 ```
 
 ## File Guide
@@ -249,6 +270,10 @@ Defines settlement batch and line item entities, status constants, lifecycle met
 
 Defines the repository interface and repository-level errors for future adapters.
 
+`internal/settlement/adapters/postgres/repository.go`
+
+Persists settlement batches and line items in PostgreSQL and participates in context-propagated transactions.
+
 `migrations/000006_create_settlements.sql`
 
 Creates settlement batch and line item tables, adds `payments.settlement_batch_id`, and adds indexes/constraints for settlement processing.
@@ -260,7 +285,7 @@ Creates settlement batch and line item tables, adds `payments.settlement_batch_i
 - [x] Add settlement repository interface.
 - [x] Add settlement migration.
 - [x] Add domain tests.
-- [ ] Add PostgreSQL settlement repository adapter.
+- [x] Add PostgreSQL settlement repository adapter.
 - [ ] Add settlement service.
 - [ ] Add captured-payment claim query.
 - [ ] Add payment `SETTLED` transition wiring.
