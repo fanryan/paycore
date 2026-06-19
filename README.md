@@ -37,7 +37,7 @@ Current development stage:
 - Merchant entity, service, repository interface, and in-memory adapter implemented
 - Payer entity, service, repository interface, and in-memory adapter implemented
 - PostgreSQL repository adapters implemented for merchant, payer, payment, holds, idempotency records, and outbox events
-- PostgreSQL merchant, payer, payment, hold, idempotency, and outbox schema migrations added
+- PostgreSQL merchant, payer, payment, hold, idempotency, outbox, and settlement schema migrations added
 - Runtime repository backend switch implemented with `PAYCORE_REPOSITORY_BACKEND=memory|postgres`
 - Shared transactor added for Postgres transaction propagation through `context.Context`
 - Transactional outbox foundation implemented for `payment.authorized` and `payment.captured` events
@@ -52,6 +52,8 @@ Current development stage:
 - Payment authorization HTTP endpoint implemented with local in-memory `Idempotency-Key` enforcement
 - Payment capture service and HTTP endpoint implemented with local in-memory `Idempotency-Key` enforcement
 - Redis-backed fixed-window rate limiting implemented for payment mutation routes
+- Settlement batch and line item domain foundation implemented
+- Settlement schema migration added with double-settlement guards
 - Shared currency normalization and validation implemented
 - Shared random id helper implemented
 - Central HTTP router migrated to chi for path parameters and feature route composition
@@ -78,7 +80,7 @@ POST /payments/authorize
 POST /payments/{payment_id}/capture
 ```
 
-Runtime wiring to PostgreSQL repositories is available through `PAYCORE_REPOSITORY_BACKEND=postgres`. Memory repositories remain the default. Redis-backed rate limiting, Redis-backed idempotency response caching, and Kafka-backed outbox publishing are implemented but opt-in. Prometheus and settlement processing have not been implemented yet.
+Runtime wiring to PostgreSQL repositories is available through `PAYCORE_REPOSITORY_BACKEND=postgres`. Memory repositories remain the default. Redis-backed rate limiting, Redis-backed idempotency response caching, and Kafka-backed outbox publishing are implemented but opt-in. Settlement domain and schema foundation exists, but the settlement service/worker/API are not implemented yet. Prometheus has not been implemented yet.
 
 Payment authorization and capture enforce `Idempotency-Key`. In memory mode, idempotency records are process-local. In Postgres mode, merchant, payer, payment, hold, idempotency, and outbox records use PostgreSQL repositories. Payment authorization and capture business mutations plus outbox event creation run through a service-level transaction boundary in Postgres mode. Redis-backed rate limiting fails closed if Redis is unavailable. Redis-backed idempotency caching falls back to durable records if Redis is unavailable.
 
@@ -253,6 +255,12 @@ docker compose up -d redis
 PAYCORE_REDIS_ADDR=localhost:6379 go test ./internal/idempotency/adapters/redis
 ```
 
+To run the settlement domain tests:
+
+```bash
+go test ./internal/settlement
+```
+
 To run the Postgres + Kafka outbox worker integration test:
 
 ```bash
@@ -348,6 +356,10 @@ paycore/
         postgres/
           repository.go
           repository_test.go
+    settlement/
+      entity.go
+      entity_test.go
+      repository.go
     shared/
       config/
         config.go
@@ -372,12 +384,14 @@ paycore/
     payer.md
     payment.md
     postgresql-migrations.md
+    settlement.md
   migrations/
     000001_create_merchants.sql
     000002_create_payers.sql
     000003_create_payments.sql
     000004_create_idempotency_records.sql
     000005_create_outbox_events.sql
+    000006_create_settlements.sql
   go.mod
   docker-compose.yml
   .env.example
@@ -467,13 +481,13 @@ Current documentation:
 - `docs/payment.md`
 - `docs/postgresql-migrations.md`
 - `docs/rate-limiting.md`
+- `docs/settlement.md`
 
 Planned documentation:
 
 - `docs/architecture-tradeoffs.md`
 - `docs/payment-lifecycle.md`
 - `docs/idempotency.md`
-- `docs/settlement.md`
 - `docs/outbox.md`
 - `docs/failure-modes.md`
 - `docs/performance-results.md`

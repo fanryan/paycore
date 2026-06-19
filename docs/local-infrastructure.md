@@ -14,7 +14,7 @@ The repository currently provides Docker Compose services for:
 - Persistent Docker volumes for PostgreSQL, Redis, and Kafka.
 - Health checks for PostgreSQL, Redis, and Kafka.
 - Local environment template in `.env.example`.
-- PostgreSQL merchant, payer, payment, hold, idempotency, and outbox schema migrations.
+- PostgreSQL merchant, payer, payment, hold, idempotency, outbox, and settlement schema migrations.
 - PostgreSQL repository runtime mode through `PAYCORE_REPOSITORY_BACKEND=postgres`.
 - Kafka broker configuration loading through `PAYCORE_KAFKA_BROKERS`.
 - Kafka outbox topic configuration loading through `PAYCORE_KAFKA_OUTBOX_TOPIC`.
@@ -34,7 +34,6 @@ paycore-kafka
 
 These are planned but not currently implemented:
 
-- PostgreSQL settlement migrations.
 - Prometheus and Grafana.
 - Dockerized PayCore API service.
 
@@ -219,6 +218,7 @@ Applies local PostgreSQL migrations and records applied files in `schema_migrati
 - [x] Add Redis idempotency cache config loading.
 - [x] Add PostgreSQL merchant and payer migrations.
 - [x] Add PostgreSQL payment and idempotency migrations.
+- [x] Add PostgreSQL settlement migrations.
 - [x] Add migration runner.
 - [x] Add PostgreSQL repository adapters.
 - [x] Wire API runtime to PostgreSQL repository adapters.

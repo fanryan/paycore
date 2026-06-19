@@ -13,6 +13,7 @@ The repository currently includes plain SQL migrations for:
 - Payment and hold table creation in `migrations/000003_create_payments.sql`.
 - Idempotency record table creation in `migrations/000004_create_idempotency_records.sql`.
 - Outbox event table creation in `migrations/000005_create_outbox_events.sql`.
+- Settlement batch and line item table creation in `migrations/000006_create_settlements.sql`.
 - Migration runner command in `cmd/paycore-migrate`.
 
 The migrations define:
@@ -26,6 +27,8 @@ The migrations define:
 - Payment hold status constraints.
 - Idempotency status constraints.
 - Outbox event status constraints.
+- Settlement batch status constraints.
+- Settlement double-settlement constraints.
 - Timestamp columns for creation and update time.
 
 ### Not Implemented Yet
@@ -33,10 +36,8 @@ The migrations define:
 These are planned but not currently implemented:
 
 - Automatic migration execution in app startup.
-- Settlement migrations.
 - Single transaction that also includes idempotency completion.
-- Outbox publisher worker loop.
-- Redis-backed idempotency response cache.
+- Settlement repository adapter and worker runtime.
 
 ## 2. Migration Files
 
@@ -49,6 +50,7 @@ migrations/
   000003_create_payments.sql
   000004_create_idempotency_records.sql
   000005_create_outbox_events.sql
+  000006_create_settlements.sql
 ```
 
 The files are plain SQL and are applied by the local `paycore-migrate` command.
@@ -189,7 +191,48 @@ Current indexes:
 
 Payment authorization currently writes a `payment.authorized` event. Payment capture writes a `payment.captured` event. In Postgres mode, those event inserts run inside the payment service transaction with payer, payment, and hold mutations.
 
-## 8. Migration Runner
+## 8. Settlement Schema
+
+The `settlement_batches` table stores:
+
+- `id`
+- `status`
+- settlement window start and end
+- processing lock fields
+- completion timestamp
+- last error
+- created and updated timestamps
+
+Current constraints:
+
+- `id` is the primary key.
+- `status` must be `CREATED`, `PROCESSING`, `COMPLETED`, or `FAILED`.
+- `window_end` must be after `window_start`.
+- processing batches must have `claimed_by` and `locked_until`.
+- completed batches must have `completed_at`.
+
+The `settlement_line_items` table stores:
+
+- `id`
+- `settlement_batch_id`
+- `merchant_id`
+- `payment_id`
+- gross, fee, and net amounts in minor units
+- currency
+- payment captured timestamp
+- created timestamp
+
+Current constraints:
+
+- `payment_id` is unique to prevent duplicate settlement line items.
+- amount must be positive.
+- fee amount must be non-negative.
+- net amount must equal amount minus fee.
+- currency must be uppercase.
+
+The migration also adds `payments.settlement_batch_id` and indexes captured, unsettled payments for future settlement claim queries.
+
+## 9. Migration Runner
 
 The migration runner lives at:
 
@@ -213,7 +256,7 @@ Run it with:
 PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=disable' go run ./cmd/paycore-migrate
 ```
 
-## 9. Current Runtime Relationship
+## 10. Current Runtime Relationship
 
 The PayCore API does not run migrations automatically. Migrations are applied manually through `cmd/paycore-migrate`.
 
@@ -234,9 +277,9 @@ PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=
 go run ./cmd/paycore-api
 ```
 
-In Postgres mode, merchant, payer, payment, hold, and idempotency repositories use PostgreSQL.
+In Postgres mode, merchant, payer, payment, hold, idempotency, and outbox repositories use PostgreSQL. Settlement tables exist, but the settlement repository adapter is not implemented yet.
 
-## 10. Manual Usage
+## 11. Manual Usage
 
 With local PostgreSQL running:
 
@@ -259,8 +302,8 @@ Run the command repeatedly as needed. Already-applied migrations are skipped.
 - [x] Add payment and hold migrations.
 - [x] Add idempotency record migration.
 - [x] Add outbox event migration.
+- [x] Add settlement migration.
 - [x] Add migration runner.
-- [ ] Add settlement migration.
 - [x] Add PostgreSQL repository adapters.
 - [x] Wire API runtime to PostgreSQL repository adapters.
 - [x] Add Postgres-backed HTTP lifecycle smoke test.
