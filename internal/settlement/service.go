@@ -5,22 +5,30 @@ import (
 	"errors"
 	"time"
 
+	"github.com/fanryan/paycore/internal/outbox"
+	"github.com/fanryan/paycore/internal/payment"
 	"github.com/fanryan/paycore/internal/shared/db"
 	"github.com/fanryan/paycore/internal/shared/id"
 )
 
 var (
-	ErrRepositoryRequired = errors.New("settlement repository is required")
-	ErrTransactorRequired = errors.New("settlement transactor is required")
+	ErrRepositoryRequired        = errors.New("settlement repository is required")
+	ErrPaymentRepositoryRequired = errors.New("payment repository is required")
+	ErrTransactorRequired        = errors.New("settlement transactor is required")
 )
 
 const (
 	defaultClaimLimit = 100
 	defaultLockTTL    = 5 * time.Minute
+
+	aggregateTypePayment    = "payment"
+	eventTypePaymentSettled = "payment.settled"
 )
 
 type Service struct {
 	repository Repository
+	payments   payment.Repository
+	outbox     outbox.Repository
 	transactor db.Transactor
 	workerID   string
 	claimLimit int
@@ -30,6 +38,8 @@ type Service struct {
 
 type ServiceConfig struct {
 	Repository Repository
+	Payments   payment.Repository
+	Outbox     outbox.Repository
 	Transactor db.Transactor
 	WorkerID   string
 	ClaimLimit int
@@ -45,6 +55,17 @@ type CreateBatchInput struct {
 type CreateBatchResult struct {
 	Batch     Batch
 	LineItems []LineItem
+	Payments  []payment.Payment
+}
+
+type paymentSettledPayload struct {
+	PaymentID         string    `json:"payment_id"`
+	MerchantID        string    `json:"merchant_id"`
+	PayerID           string    `json:"payer_id"`
+	SettlementBatchID string    `json:"settlement_batch_id"`
+	AmountMinor       int64     `json:"amount_minor"`
+	Currency          string    `json:"currency"`
+	SettledAt         time.Time `json:"settled_at"`
 }
 
 func NewService(config ServiceConfig) (*Service, error) {
@@ -52,8 +73,16 @@ func NewService(config ServiceConfig) (*Service, error) {
 		return nil, ErrRepositoryRequired
 	}
 
+	if config.Payments == nil {
+		return nil, ErrPaymentRepositoryRequired
+	}
+
 	if config.Transactor == nil {
 		return nil, ErrTransactorRequired
+	}
+
+	if config.Outbox == nil {
+		config.Outbox = outbox.NoopRepository{}
 	}
 
 	if config.WorkerID == "" {
@@ -74,6 +103,8 @@ func NewService(config ServiceConfig) (*Service, error) {
 
 	return &Service{
 		repository: config.Repository,
+		payments:   config.Payments,
+		outbox:     config.Outbox,
 		transactor: config.Transactor,
 		workerID:   config.WorkerID,
 		claimLimit: config.ClaimLimit,
@@ -130,7 +161,23 @@ func (s *Service) CreateBatch(ctx context.Context, input CreateBatchInput) (Crea
 		}
 
 		lineItems := make([]LineItem, 0, len(claimed))
-		for _, payment := range claimed {
+		settledPayments := make([]payment.Payment, 0, len(claimed))
+		for _, claimedPayment := range claimed {
+			paymentRecord, err := s.payments.GetPayment(ctx, claimedPayment.PaymentID)
+			if err != nil {
+				return err
+			}
+
+			settledPayment, err := paymentRecord.Settle(now)
+			if err != nil {
+				return err
+			}
+
+			settledPayment, err = s.payments.UpdatePayment(ctx, settledPayment)
+			if err != nil {
+				return err
+			}
+
 			itemID, err := id.New("setitem")
 			if err != nil {
 				return err
@@ -139,12 +186,12 @@ func (s *Service) CreateBatch(ctx context.Context, input CreateBatchInput) (Crea
 			item, err := NewLineItem(NewLineItemInput{
 				ID:              itemID,
 				BatchID:         batch.ID,
-				MerchantID:      payment.MerchantID,
-				PaymentID:       payment.PaymentID,
-				AmountMinor:     payment.AmountMinor,
+				MerchantID:      claimedPayment.MerchantID,
+				PaymentID:       claimedPayment.PaymentID,
+				AmountMinor:     claimedPayment.AmountMinor,
 				FeeAmountMinor:  0,
-				Currency:        payment.Currency,
-				PaymentCaptured: payment.CapturedAt,
+				Currency:        claimedPayment.Currency,
+				PaymentCaptured: claimedPayment.CapturedAt,
 				Now:             now,
 			})
 			if err != nil {
@@ -156,7 +203,31 @@ func (s *Service) CreateBatch(ctx context.Context, input CreateBatchInput) (Crea
 				return err
 			}
 
+			event, err := outbox.NewEvent(outbox.NewEventInput{
+				AggregateType: aggregateTypePayment,
+				AggregateID:   settledPayment.ID,
+				EventType:     eventTypePaymentSettled,
+				Payload: paymentSettledPayload{
+					PaymentID:         settledPayment.ID,
+					MerchantID:        settledPayment.MerchantID,
+					PayerID:           settledPayment.PayerID,
+					SettlementBatchID: batch.ID,
+					AmountMinor:       settledPayment.AmountMinor,
+					Currency:          settledPayment.Currency,
+					SettledAt:         now,
+				},
+				Now: now,
+			})
+			if err != nil {
+				return err
+			}
+
+			if _, err := s.outbox.CreateEvent(ctx, event); err != nil {
+				return err
+			}
+
 			lineItems = append(lineItems, item)
+			settledPayments = append(settledPayments, settledPayment)
 		}
 
 		batch, err = batch.Complete(now)
@@ -172,6 +243,7 @@ func (s *Service) CreateBatch(ctx context.Context, input CreateBatchInput) (Crea
 		result = CreateBatchResult{
 			Batch:     batch,
 			LineItems: lineItems,
+			Payments:  settledPayments,
 		}
 
 		return nil

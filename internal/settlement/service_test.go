@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fanryan/paycore/internal/outbox"
+	"github.com/fanryan/paycore/internal/payment"
 	"github.com/fanryan/paycore/internal/settlement"
 	"github.com/fanryan/paycore/internal/shared/db"
 )
@@ -29,7 +31,9 @@ func TestServiceCreatesCompletedBatchWithLineItems(t *testing.T) {
 			},
 		},
 	}
-	service := newSettlementService(t, repository)
+	payments := newFakePaymentRepository(t, "pay-1", "pay-2")
+	outboxRepository := &fakeOutboxRepository{}
+	service := newSettlementService(t, repository, payments, outboxRepository)
 
 	result, err := service.CreateBatch(context.Background(), settlement.CreateBatchInput{
 		WindowStart: testNow().Add(-time.Hour),
@@ -47,8 +51,24 @@ func TestServiceCreatesCompletedBatchWithLineItems(t *testing.T) {
 		t.Fatalf("expected 2 line items, got %d", len(result.LineItems))
 	}
 
+	if len(result.Payments) != 2 {
+		t.Fatalf("expected 2 settled payments, got %d", len(result.Payments))
+	}
+
+	if result.Payments[0].Status != payment.StatusSettled {
+		t.Fatalf("expected first payment SETTLED, got %q", result.Payments[0].Status)
+	}
+
 	if result.LineItems[0].PaymentID != "pay-1" {
 		t.Fatalf("expected first payment pay-1, got %q", result.LineItems[0].PaymentID)
+	}
+
+	if len(outboxRepository.created) != 2 {
+		t.Fatalf("expected 2 outbox events, got %d", len(outboxRepository.created))
+	}
+
+	if outboxRepository.created[0].EventType != "payment.settled" {
+		t.Fatalf("expected payment.settled event, got %q", outboxRepository.created[0].EventType)
 	}
 
 	if repository.claimInput.BatchID != result.Batch.ID {
@@ -62,7 +82,7 @@ func TestServiceCreatesCompletedBatchWithLineItems(t *testing.T) {
 
 func TestServiceCompletesEmptyBatchWhenNoPaymentsAreClaimed(t *testing.T) {
 	repository := &fakeRepository{}
-	service := newSettlementService(t, repository)
+	service := newSettlementService(t, repository, newFakePaymentRepository(t), &fakeOutboxRepository{})
 
 	result, err := service.CreateBatch(context.Background(), settlement.CreateBatchInput{
 		WindowStart: testNow().Add(-time.Hour),
@@ -91,6 +111,15 @@ func TestServiceReturnsErrorWhenDependenciesMissing(t *testing.T) {
 
 	_, err = settlement.NewService(settlement.ServiceConfig{
 		Repository: &fakeRepository{},
+		Transactor: db.NoopTransactor{},
+	})
+	if !errors.Is(err, settlement.ErrPaymentRepositoryRequired) {
+		t.Fatalf("expected ErrPaymentRepositoryRequired, got %v", err)
+	}
+
+	_, err = settlement.NewService(settlement.ServiceConfig{
+		Repository: &fakeRepository{},
+		Payments:   newFakePaymentRepository(t),
 	})
 	if !errors.Is(err, settlement.ErrTransactorRequired) {
 		t.Fatalf("expected ErrTransactorRequired, got %v", err)
@@ -98,7 +127,7 @@ func TestServiceReturnsErrorWhenDependenciesMissing(t *testing.T) {
 }
 
 func TestServiceReturnsValidationErrorForInvalidWindow(t *testing.T) {
-	service := newSettlementService(t, &fakeRepository{})
+	service := newSettlementService(t, &fakeRepository{}, newFakePaymentRepository(t), &fakeOutboxRepository{})
 
 	_, err := service.CreateBatch(context.Background(), settlement.CreateBatchInput{
 		WindowStart: testNow(),
@@ -109,11 +138,13 @@ func TestServiceReturnsValidationErrorForInvalidWindow(t *testing.T) {
 	}
 }
 
-func newSettlementService(t *testing.T, repository settlement.Repository) *settlement.Service {
+func newSettlementService(t *testing.T, repository settlement.Repository, payments payment.Repository, outboxRepository outbox.Repository) *settlement.Service {
 	t.Helper()
 
 	service, err := settlement.NewService(settlement.ServiceConfig{
 		Repository: repository,
+		Payments:   payments,
+		Outbox:     outboxRepository,
 		Transactor: db.NoopTransactor{},
 		WorkerID:   "worker-1",
 		ClaimLimit: 10,
@@ -125,6 +156,46 @@ func newSettlementService(t *testing.T, repository settlement.Repository) *settl
 	}
 
 	return service
+}
+
+func newFakePaymentRepository(t *testing.T, paymentIDs ...string) *fakePaymentRepository {
+	t.Helper()
+
+	repository := &fakePaymentRepository{
+		payments: map[string]payment.Payment{},
+	}
+
+	for _, paymentID := range paymentIDs {
+		repository.payments[paymentID] = capturedPayment(t, paymentID)
+	}
+
+	return repository
+}
+
+func capturedPayment(t *testing.T, paymentID string) payment.Payment {
+	t.Helper()
+
+	now := testNow().Add(-time.Hour)
+	paymentRecord, err := payment.NewAuthorizedPayment(payment.NewAuthorizedPaymentInput{
+		ID:                  paymentID,
+		MerchantID:          "merchant-1",
+		PayerID:             "payer-1",
+		AmountMinor:         4000,
+		Currency:            "USD",
+		AuthorizationHoldID: paymentID + "-hold",
+		Now:                 now,
+		ExpiresAt:           now.Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("new authorized payment: %v", err)
+	}
+
+	captured, err := paymentRecord.Capture(now.Add(30 * time.Minute))
+	if err != nil {
+		t.Fatalf("capture payment: %v", err)
+	}
+
+	return captured
 }
 
 type fakeRepository struct {
@@ -208,4 +279,75 @@ func (r *fakeRepository) ListLineItems(ctx context.Context, batchID string) ([]s
 	}
 
 	return items, nil
+}
+
+type fakePaymentRepository struct {
+	payments map[string]payment.Payment
+}
+
+func (r *fakePaymentRepository) CreatePayment(ctx context.Context, paymentRecord payment.Payment) (payment.Payment, error) {
+	return payment.Payment{}, errors.New("not implemented")
+}
+
+func (r *fakePaymentRepository) GetPayment(ctx context.Context, paymentID string) (payment.Payment, error) {
+	if err := ctx.Err(); err != nil {
+		return payment.Payment{}, err
+	}
+
+	paymentRecord, ok := r.payments[paymentID]
+	if !ok {
+		return payment.Payment{}, payment.ErrPaymentNotFound
+	}
+
+	return paymentRecord, nil
+}
+
+func (r *fakePaymentRepository) UpdatePayment(ctx context.Context, paymentRecord payment.Payment) (payment.Payment, error) {
+	if err := ctx.Err(); err != nil {
+		return payment.Payment{}, err
+	}
+
+	r.payments[paymentRecord.ID] = paymentRecord
+	return paymentRecord, nil
+}
+
+func (r *fakePaymentRepository) CreateHold(ctx context.Context, hold payment.Hold) (payment.Hold, error) {
+	return payment.Hold{}, errors.New("not implemented")
+}
+
+func (r *fakePaymentRepository) GetHold(ctx context.Context, holdID string) (payment.Hold, error) {
+	return payment.Hold{}, errors.New("not implemented")
+}
+
+func (r *fakePaymentRepository) GetHoldByPaymentID(ctx context.Context, paymentID string) (payment.Hold, error) {
+	return payment.Hold{}, errors.New("not implemented")
+}
+
+func (r *fakePaymentRepository) UpdateHold(ctx context.Context, hold payment.Hold) (payment.Hold, error) {
+	return payment.Hold{}, errors.New("not implemented")
+}
+
+type fakeOutboxRepository struct {
+	created []outbox.Event
+}
+
+func (r *fakeOutboxRepository) CreateEvent(ctx context.Context, event outbox.Event) (outbox.Event, error) {
+	if err := ctx.Err(); err != nil {
+		return outbox.Event{}, err
+	}
+
+	r.created = append(r.created, event)
+	return event, nil
+}
+
+func (r *fakeOutboxRepository) ClaimPendingEvents(ctx context.Context, input outbox.ClaimPendingEventsInput) ([]outbox.Event, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (r *fakeOutboxRepository) MarkEventPublished(ctx context.Context, eventID string, now time.Time) (outbox.Event, error) {
+	return outbox.Event{}, errors.New("not implemented")
+}
+
+func (r *fakeOutboxRepository) MarkEventFailed(ctx context.Context, input outbox.MarkEventFailedInput) (outbox.Event, error) {
+	return outbox.Event{}, errors.New("not implemented")
 }

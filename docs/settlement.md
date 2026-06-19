@@ -41,6 +41,8 @@ This document explains the current PayCore settlement foundation as it exists to
   - start processing
   - claim captured payments
   - create line items
+  - mark claimed payments `SETTLED`
+  - create `payment.settled` outbox events
   - complete batch
 - Domain tests for batch lifecycle, stale locks, line item validation, and net amount calculation.
 - Service tests for batch creation and empty-batch completion.
@@ -52,8 +54,6 @@ This document explains the current PayCore settlement foundation as it exists to
 - Settlement worker command.
 - `POST /settlement-batches`.
 - `GET /settlement-batches/{batch_id}`.
-- Payment `SETTLED` transition wiring inside the settlement flow.
-- `payment.settled` outbox event creation.
 - Redis settlement coordination lock.
 - Stale batch recovery worker.
 - Settlement metrics.
@@ -117,9 +117,10 @@ settlement.CreateBatchInput{
 3. Service marks the batch `PROCESSING` with `claimed_by` and `locked_until`.
 4. Repository claims eligible captured payments for the batch.
 5. Service creates settlement line items.
-6. Service marks settlement batch `COMPLETED`.
-
-Payment `SETTLED` transition and `payment.settled` outbox events are planned for the next settlement milestone.
+6. Service loads each claimed payment.
+7. Service marks each payment `SETTLED`.
+8. Service writes a `payment.settled` outbox event for each settled payment.
+9. Service marks settlement batch `COMPLETED`.
 
 ### Diagram
 
@@ -132,6 +133,8 @@ Settlement Service
   +--> create settlement batch
   +--> claim captured payments
   +--> create line items
+  +--> mark payments SETTLED
+  +--> write payment.settled outbox events
   +--> complete batch
 ```
 
@@ -248,6 +251,9 @@ Current tests cover:
 - line item amount validation
 - service creates completed batch with line items
 - service completes empty batch when no payments are claimed
+- service marks claimed payments settled
+- service writes `payment.settled` outbox events
+- Postgres service integration for settled payment and outbox event
 - Postgres batch create/get/update
 - Postgres captured-payment claim flow
 - Postgres line item create/list
@@ -259,6 +265,14 @@ Run:
 
 ```bash
 go test ./internal/settlement
+```
+
+Run PostgreSQL settlement service integration tests:
+
+```bash
+docker compose up -d postgres
+PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=disable' go run ./cmd/paycore-migrate
+PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=disable' go test ./internal/settlement
 ```
 
 Run PostgreSQL adapter tests:
@@ -281,7 +295,7 @@ Defines the repository interface and repository-level errors for future adapters
 
 `internal/settlement/service.go`
 
-Creates settlement batches, starts processing, claims captured payments, creates line items, and completes the batch inside a transaction.
+Creates settlement batches, starts processing, claims captured payments, creates line items, marks payments `SETTLED`, writes `payment.settled` outbox events, and completes the batch inside a transaction.
 
 `internal/settlement/adapters/postgres/repository.go`
 
@@ -301,8 +315,8 @@ Creates settlement batch and line item tables, adds `payments.settlement_batch_i
 - [x] Add PostgreSQL settlement repository adapter.
 - [x] Add settlement service.
 - [x] Add captured-payment claim query.
-- [ ] Add payment `SETTLED` transition wiring.
-- [ ] Add `payment.settled` outbox event creation.
+- [x] Add payment `SETTLED` transition wiring.
+- [x] Add `payment.settled` outbox event creation.
 - [ ] Add settlement worker command.
 - [ ] Add settlement HTTP endpoints.
 - [ ] Add stale batch recovery tests.

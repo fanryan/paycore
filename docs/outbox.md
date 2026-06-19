@@ -13,6 +13,7 @@ This document explains the current PayCore transactional outbox foundation as it
 - Outbox migration in `migrations/000005_create_outbox_events.sql`.
 - Payment authorization creates a `payment.authorized` event.
 - Payment capture creates a `payment.captured` event.
+- Settlement creates a `payment.settled` event for each settled payment.
 - Postgres mode writes outbox events inside the payment service transaction.
 - Memory and PostgreSQL repositories can claim pending/failed events for publishing.
 - PostgreSQL claiming uses `FOR UPDATE SKIP LOCKED`.
@@ -132,6 +133,8 @@ PostgreSQL write errors
 ```
 
 Any outbox creation error aborts the payment service transaction.
+
+Settlement batch creation also writes `payment.settled` events in the same transaction as settlement line items and payment `SETTLED` transitions.
 
 ## 4. Claim And Retry Flow
 
@@ -322,6 +325,7 @@ Current tests cover:
 - Postgres + Kafka worker integration test when `PAYCORE_DATABASE_URL` and `PAYCORE_KAFKA_BROKERS` are set
 - payment authorization outbox event creation
 - payment capture outbox event creation
+- payment settlement outbox event creation
 - API Postgres smoke coverage for outbox rows
 
 Run:

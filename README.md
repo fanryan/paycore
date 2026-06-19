@@ -55,7 +55,7 @@ Current development stage:
 - Settlement batch and line item domain foundation implemented
 - Settlement schema migration added with double-settlement guards
 - PostgreSQL settlement repository adapter implemented
-- Settlement service implemented for batch creation, captured-payment claims, line items, and batch completion
+- Settlement service implemented for batch creation, captured-payment claims, line items, payment `SETTLED` transitions, `payment.settled` outbox events, and batch completion
 - Shared currency normalization and validation implemented
 - Shared random id helper implemented
 - Central HTTP router migrated to chi for path parameters and feature route composition
@@ -261,6 +261,14 @@ To run the settlement domain tests:
 
 ```bash
 go test ./internal/settlement
+```
+
+To run the settlement service integration tests:
+
+```bash
+docker compose up -d postgres
+PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=disable' go run ./cmd/paycore-migrate
+PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=disable' go test ./internal/settlement
 ```
 
 To run the settlement PostgreSQL adapter tests:

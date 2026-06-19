@@ -64,6 +64,9 @@ The Go API currently supports the payment foundation:
 - `POST /payments/{payment_id}/capture` route composed through `internal/http/router.go`.
 - Runtime repository backend switch through `PAYCORE_REPOSITORY_BACKEND=memory|postgres`.
 - Service-level transaction orchestration through `internal/shared/db.Transactor`.
+- Transactional outbox events for `payment.authorized`, `payment.captured`, and `payment.settled`.
+- Redis-backed rate limiting on payment mutation routes.
+- Redis-backed idempotency response cache for replay acceleration.
 - Postgres-backed HTTP smoke test in `cmd/paycore-api/main_test.go`.
 - Entity, hold, repository, service, handler, and router tests.
 
@@ -72,11 +75,7 @@ The Go API currently supports the payment foundation:
 These are planned but not currently implemented:
 
 - `GET /payments/{payment_id}`.
-- Redis-backed rate limiting.
-- Redis-backed idempotency response cache.
 - Single PostgreSQL transaction that also includes idempotency completion.
-- Transactional outbox event creation.
-- Kafka event publishing.
 - Authorization expiry worker.
 - Durable crash recovery.
 
@@ -588,7 +587,7 @@ Persists outbox events and participates in context-propagated PostgreSQL transac
 - [x] Register `POST /payments/{payment_id}/capture`.
 - [x] Add local idempotency-key enforcement for authorization.
 - [x] Add local idempotency-key enforcement for capture.
-- [ ] Add Redis-backed rate limiting.
+- [x] Add Redis-backed rate limiting.
 - [x] Add PostgreSQL payment and hold migrations.
 - [x] Add PostgreSQL payment and hold repository.
 - [x] Wire API runtime to PostgreSQL payment repository.
@@ -598,3 +597,4 @@ Persists outbox events and participates in context-propagated PostgreSQL transac
 - [ ] Move durable idempotency completion into the payment transaction boundary.
 - [x] Add transactional outbox event for `payment.authorized`.
 - [x] Add transactional outbox event for `payment.captured`.
+- [x] Add transactional outbox event for `payment.settled`.
