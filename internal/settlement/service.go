@@ -58,6 +58,16 @@ type CreateBatchResult struct {
 	Payments  []payment.Payment
 }
 
+type RecoverStaleBatchesInput struct {
+	Limit int
+}
+
+type RecoverStaleBatchesResult struct {
+	Batches   []Batch
+	LineItems []LineItem
+	Payments  []payment.Payment
+}
+
 type paymentSettledPayload struct {
 	PaymentID         string    `json:"payment_id"`
 	MerchantID        string    `json:"merchant_id"`
@@ -162,72 +172,9 @@ func (s *Service) CreateBatch(ctx context.Context, input CreateBatchInput) (Crea
 
 		lineItems := make([]LineItem, 0, len(claimed))
 		settledPayments := make([]payment.Payment, 0, len(claimed))
-		for _, claimedPayment := range claimed {
-			paymentRecord, err := s.payments.GetPayment(ctx, claimedPayment.PaymentID)
-			if err != nil {
-				return err
-			}
-
-			settledPayment, err := paymentRecord.Settle(now)
-			if err != nil {
-				return err
-			}
-
-			settledPayment, err = s.payments.UpdatePayment(ctx, settledPayment)
-			if err != nil {
-				return err
-			}
-
-			itemID, err := id.New("setitem")
-			if err != nil {
-				return err
-			}
-
-			item, err := NewLineItem(NewLineItemInput{
-				ID:              itemID,
-				BatchID:         batch.ID,
-				MerchantID:      claimedPayment.MerchantID,
-				PaymentID:       claimedPayment.PaymentID,
-				AmountMinor:     claimedPayment.AmountMinor,
-				FeeAmountMinor:  0,
-				Currency:        claimedPayment.Currency,
-				PaymentCaptured: claimedPayment.CapturedAt,
-				Now:             now,
-			})
-			if err != nil {
-				return err
-			}
-
-			item, err = s.repository.CreateLineItem(ctx, item)
-			if err != nil {
-				return err
-			}
-
-			event, err := outbox.NewEvent(outbox.NewEventInput{
-				AggregateType: aggregateTypePayment,
-				AggregateID:   settledPayment.ID,
-				EventType:     eventTypePaymentSettled,
-				Payload: paymentSettledPayload{
-					PaymentID:         settledPayment.ID,
-					MerchantID:        settledPayment.MerchantID,
-					PayerID:           settledPayment.PayerID,
-					SettlementBatchID: batch.ID,
-					AmountMinor:       settledPayment.AmountMinor,
-					Currency:          settledPayment.Currency,
-					SettledAt:         now,
-				},
-				Now: now,
-			})
-			if err != nil {
-				return err
-			}
-
-			if _, err := s.outbox.CreateEvent(ctx, event); err != nil {
-				return err
-			}
-
-			lineItems = append(lineItems, item)
-			settledPayments = append(settledPayments, settledPayment)
+		lineItems, settledPayments, err = s.settleClaimedPayments(ctx, batch.ID, claimed, now)
+		if err != nil {
+			return err
 		}
 
 		batch, err = batch.Complete(now)
@@ -253,4 +200,147 @@ func (s *Service) CreateBatch(ctx context.Context, input CreateBatchInput) (Crea
 	}
 
 	return result, nil
+}
+
+func (s *Service) RecoverStaleBatches(ctx context.Context, input RecoverStaleBatchesInput) (RecoverStaleBatchesResult, error) {
+	var result RecoverStaleBatchesResult
+
+	limit := input.Limit
+	if limit <= 0 {
+		limit = s.claimLimit
+	}
+
+	err := s.transactor.WithinTx(ctx, func(ctx context.Context) error {
+		now := s.now().UTC()
+
+		staleBatches, err := s.repository.ListStaleProcessingBatches(ctx, ListStaleProcessingBatchesInput{
+			Now:   now,
+			Limit: limit,
+		})
+		if err != nil {
+			return err
+		}
+
+		result.Batches = make([]Batch, 0, len(staleBatches))
+		result.LineItems = make([]LineItem, 0)
+		result.Payments = make([]payment.Payment, 0)
+
+		for _, staleBatch := range staleBatches {
+			batch, err := staleBatch.StartProcessing(s.workerID, now.Add(s.lockTTL), now)
+			if err != nil {
+				return err
+			}
+
+			batch, err = s.repository.UpdateBatch(ctx, batch)
+			if err != nil {
+				return err
+			}
+
+			claimed, err := s.repository.ListClaimedPayments(ctx, batch.ID)
+			if err != nil {
+				return err
+			}
+
+			lineItems, settledPayments, err := s.settleClaimedPayments(ctx, batch.ID, claimed, now)
+			if err != nil {
+				return err
+			}
+
+			batch, err = batch.Complete(now)
+			if err != nil {
+				return err
+			}
+
+			batch, err = s.repository.UpdateBatch(ctx, batch)
+			if err != nil {
+				return err
+			}
+
+			result.Batches = append(result.Batches, batch)
+			result.LineItems = append(result.LineItems, lineItems...)
+			result.Payments = append(result.Payments, settledPayments...)
+		}
+
+		return nil
+	})
+	if err != nil {
+		return RecoverStaleBatchesResult{}, err
+	}
+
+	return result, nil
+}
+
+func (s *Service) settleClaimedPayments(ctx context.Context, batchID string, claimed []ClaimedPayment, now time.Time) ([]LineItem, []payment.Payment, error) {
+	lineItems := make([]LineItem, 0, len(claimed))
+	settledPayments := make([]payment.Payment, 0, len(claimed))
+
+	for _, claimedPayment := range claimed {
+		paymentRecord, err := s.payments.GetPayment(ctx, claimedPayment.PaymentID)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		settledPayment, err := paymentRecord.Settle(now)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		settledPayment, err = s.payments.UpdatePayment(ctx, settledPayment)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		itemID, err := id.New("setitem")
+		if err != nil {
+			return nil, nil, err
+		}
+
+		item, err := NewLineItem(NewLineItemInput{
+			ID:              itemID,
+			BatchID:         batchID,
+			MerchantID:      claimedPayment.MerchantID,
+			PaymentID:       claimedPayment.PaymentID,
+			AmountMinor:     claimedPayment.AmountMinor,
+			FeeAmountMinor:  0,
+			Currency:        claimedPayment.Currency,
+			PaymentCaptured: claimedPayment.CapturedAt,
+			Now:             now,
+		})
+		if err != nil {
+			return nil, nil, err
+		}
+
+		item, err = s.repository.CreateLineItem(ctx, item)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		event, err := outbox.NewEvent(outbox.NewEventInput{
+			AggregateType: aggregateTypePayment,
+			AggregateID:   settledPayment.ID,
+			EventType:     eventTypePaymentSettled,
+			Payload: paymentSettledPayload{
+				PaymentID:         settledPayment.ID,
+				MerchantID:        settledPayment.MerchantID,
+				PayerID:           settledPayment.PayerID,
+				SettlementBatchID: batchID,
+				AmountMinor:       settledPayment.AmountMinor,
+				Currency:          settledPayment.Currency,
+				SettledAt:         now,
+			},
+			Now: now,
+		})
+		if err != nil {
+			return nil, nil, err
+		}
+
+		if _, err := s.outbox.CreateEvent(ctx, event); err != nil {
+			return nil, nil, err
+		}
+
+		lineItems = append(lineItems, item)
+		settledPayments = append(settledPayments, settledPayment)
+	}
+
+	return lineItems, settledPayments, nil
 }

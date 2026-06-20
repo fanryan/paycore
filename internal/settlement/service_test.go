@@ -101,6 +101,74 @@ func TestServiceCompletesEmptyBatchWhenNoPaymentsAreClaimed(t *testing.T) {
 	}
 }
 
+func TestServiceRecoversStaleProcessingBatch(t *testing.T) {
+	staleBatch := staleProcessingBatch(t, "batch-stale-1")
+	repository := &fakeRepository{
+		batches: map[string]settlement.Batch{
+			staleBatch.ID: staleBatch,
+		},
+		staleBatches: []settlement.Batch{staleBatch},
+		claimedByBatch: map[string][]settlement.ClaimedPayment{
+			staleBatch.ID: {
+				{
+					PaymentID:       "pay-1",
+					MerchantID:      "merchant-1",
+					AmountMinor:     4000,
+					Currency:        "USD",
+					CapturedAt:      testNow().Add(-time.Minute),
+					SettlementBatch: staleBatch.ID,
+				},
+			},
+		},
+	}
+	payments := newFakePaymentRepository(t, "pay-1")
+	outboxRepository := &fakeOutboxRepository{}
+	service := newSettlementService(t, repository, payments, outboxRepository)
+
+	result, err := service.RecoverStaleBatches(context.Background(), settlement.RecoverStaleBatchesInput{
+		Limit: 5,
+	})
+	if err != nil {
+		t.Fatalf("expected recovery to succeed, got error: %v", err)
+	}
+
+	if repository.staleInput.Limit != 5 {
+		t.Fatalf("expected stale lookup limit 5, got %d", repository.staleInput.Limit)
+	}
+
+	if len(result.Batches) != 1 {
+		t.Fatalf("expected 1 recovered batch, got %d", len(result.Batches))
+	}
+
+	if result.Batches[0].ID != staleBatch.ID {
+		t.Fatalf("expected recovered batch %q, got %q", staleBatch.ID, result.Batches[0].ID)
+	}
+
+	if result.Batches[0].Status != settlement.BatchStatusCompleted {
+		t.Fatalf("expected recovered batch COMPLETED, got %q", result.Batches[0].Status)
+	}
+
+	if len(result.LineItems) != 1 {
+		t.Fatalf("expected 1 line item, got %d", len(result.LineItems))
+	}
+
+	if result.LineItems[0].BatchID != staleBatch.ID {
+		t.Fatalf("expected line item batch %q, got %q", staleBatch.ID, result.LineItems[0].BatchID)
+	}
+
+	if len(result.Payments) != 1 {
+		t.Fatalf("expected 1 settled payment, got %d", len(result.Payments))
+	}
+
+	if result.Payments[0].Status != payment.StatusSettled {
+		t.Fatalf("expected recovered payment SETTLED, got %q", result.Payments[0].Status)
+	}
+
+	if len(outboxRepository.created) != 1 {
+		t.Fatalf("expected 1 outbox event, got %d", len(outboxRepository.created))
+	}
+}
+
 func TestServiceReturnsErrorWhenDependenciesMissing(t *testing.T) {
 	_, err := settlement.NewService(settlement.ServiceConfig{
 		Transactor: db.NoopTransactor{},
@@ -198,11 +266,35 @@ func capturedPayment(t *testing.T, paymentID string) payment.Payment {
 	return captured
 }
 
+func staleProcessingBatch(t *testing.T, batchID string) settlement.Batch {
+	t.Helper()
+
+	batch, err := settlement.NewBatch(settlement.NewBatchInput{
+		ID:          batchID,
+		WindowStart: testNow().Add(-time.Hour),
+		WindowEnd:   testNow(),
+		Now:         testNow().Add(-2 * time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("new stale batch: %v", err)
+	}
+
+	processing, err := batch.StartProcessing("old-worker", testNow().Add(-time.Minute), testNow().Add(-2*time.Minute))
+	if err != nil {
+		t.Fatalf("start stale batch processing: %v", err)
+	}
+
+	return processing
+}
+
 type fakeRepository struct {
-	batches    map[string]settlement.Batch
-	lineItems  []settlement.LineItem
-	claimed    []settlement.ClaimedPayment
-	claimInput settlement.ClaimCapturedPaymentsInput
+	batches        map[string]settlement.Batch
+	lineItems      []settlement.LineItem
+	claimed        []settlement.ClaimedPayment
+	claimedByBatch map[string][]settlement.ClaimedPayment
+	staleBatches   []settlement.Batch
+	staleInput     settlement.ListStaleProcessingBatchesInput
+	claimInput     settlement.ClaimCapturedPaymentsInput
 }
 
 func (r *fakeRepository) CreateBatch(ctx context.Context, batch settlement.Batch) (settlement.Batch, error) {
@@ -244,6 +336,19 @@ func (r *fakeRepository) UpdateBatch(ctx context.Context, batch settlement.Batch
 	return batch, nil
 }
 
+func (r *fakeRepository) ListStaleProcessingBatches(ctx context.Context, input settlement.ListStaleProcessingBatchesInput) ([]settlement.Batch, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	r.staleInput = input
+
+	batches := make([]settlement.Batch, len(r.staleBatches))
+	copy(batches, r.staleBatches)
+
+	return batches, nil
+}
+
 func (r *fakeRepository) ClaimCapturedPayments(ctx context.Context, input settlement.ClaimCapturedPaymentsInput) ([]settlement.ClaimedPayment, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -253,6 +358,17 @@ func (r *fakeRepository) ClaimCapturedPayments(ctx context.Context, input settle
 
 	claimed := make([]settlement.ClaimedPayment, len(r.claimed))
 	copy(claimed, r.claimed)
+
+	return claimed, nil
+}
+
+func (r *fakeRepository) ListClaimedPayments(ctx context.Context, batchID string) ([]settlement.ClaimedPayment, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	claimed := make([]settlement.ClaimedPayment, len(r.claimedByBatch[batchID]))
+	copy(claimed, r.claimedByBatch[batchID])
 
 	return claimed, nil
 }

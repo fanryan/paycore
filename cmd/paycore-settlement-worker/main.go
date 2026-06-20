@@ -91,6 +91,25 @@ func main() {
 		"claim_limit", cfg.claimLimit,
 	)
 
+	recoveryResult, err := service.RecoverStaleBatches(ctx, settlement.RecoverStaleBatchesInput{
+		Limit: cfg.claimLimit,
+	})
+	if err != nil && !errors.Is(err, context.Canceled) {
+		logger.Error("settlement stale batch recovery failed", "error", err)
+		os.Exit(1)
+	}
+	if err != nil {
+		logger.Info("paycore settlement worker stopped")
+		return
+	}
+
+	logger.Info(
+		"settlement stale batch recovery completed",
+		"recovered_batches", len(recoveryResult.Batches),
+		"line_items", len(recoveryResult.LineItems),
+		"settled_payments", len(recoveryResult.Payments),
+	)
+
 	result, err := service.CreateBatch(ctx, settlement.CreateBatchInput{
 		WindowStart: window.start,
 		WindowEnd:   window.end,

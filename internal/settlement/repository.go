@@ -18,9 +18,16 @@ type Repository interface {
 	CreateBatch(ctx context.Context, batch Batch) (Batch, error)
 	GetBatch(ctx context.Context, batchID string) (Batch, error)
 	UpdateBatch(ctx context.Context, batch Batch) (Batch, error)
+	ListStaleProcessingBatches(ctx context.Context, input ListStaleProcessingBatchesInput) ([]Batch, error)
 	ClaimCapturedPayments(ctx context.Context, input ClaimCapturedPaymentsInput) ([]ClaimedPayment, error)
+	ListClaimedPayments(ctx context.Context, batchID string) ([]ClaimedPayment, error)
 	CreateLineItem(ctx context.Context, item LineItem) (LineItem, error)
 	ListLineItems(ctx context.Context, batchID string) ([]LineItem, error)
+}
+
+type ListStaleProcessingBatchesInput struct {
+	Now   time.Time
+	Limit int
 }
 
 type ClaimCapturedPaymentsInput struct {

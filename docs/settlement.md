@@ -32,7 +32,9 @@ This document explains the current PayCore settlement foundation as it exists to
   - unique `settlement_line_items.payment_id`
 - PostgreSQL adapter support for:
   - create/get/update batch
+  - list stale processing batches
   - claim captured payments
+  - list payments already claimed by a batch
   - create line item
   - list line items
   - transaction context propagation
@@ -44,8 +46,13 @@ This document explains the current PayCore settlement foundation as it exists to
   - mark claimed payments `SETTLED`
   - create `payment.settled` outbox events
   - complete batch
+- Service-level stale batch recovery:
+  - find expired `PROCESSING` batches
+  - reacquire the same batch under the current worker id
+  - load payments already claimed by that batch
+  - finish settlement for the original batch
 - Domain tests for batch lifecycle, stale locks, line item validation, and net amount calculation.
-- Service tests for batch creation and empty-batch completion.
+- Service tests for batch creation, empty-batch completion, and stale batch recovery.
 - PostgreSQL adapter integration tests.
 
 ### Not Implemented Yet
@@ -55,7 +62,6 @@ This document explains the current PayCore settlement foundation as it exists to
 - `POST /settlement-batches`.
 - `GET /settlement-batches/{batch_id}`.
 - Redis settlement coordination lock.
-- Stale batch recovery worker.
 - Settlement metrics.
 
 ### Public Endpoints
@@ -178,15 +184,18 @@ locked_until
 - `locked_until` is not nil
 - `locked_until <= now`
 
-### Planned Recovery
+### Current Recovery
 
 If a worker crashes after claiming a batch:
 
 1. Batch remains `PROCESSING`.
 2. `locked_until` eventually expires.
 3. Another worker can detect the stale batch.
-4. The worker resumes processing the same batch.
-5. Claimed payments stay associated with the same batch.
+4. `RecoverStaleBatches` reacquires the same batch under the current worker id.
+5. The service loads captured payments already linked by `payments.settlement_batch_id`.
+6. The service creates line items, marks those payments `SETTLED`, writes `payment.settled` outbox events, and completes the original batch.
+
+The one-shot settlement worker runs stale recovery before creating a new settlement batch. This keeps restart behavior simple: rerunning the worker first finishes expired in-flight work, then processes the previous completed time window.
 
 ## Validation And Errors
 
@@ -256,11 +265,14 @@ Current tests cover:
 - service completes empty batch when no payments are claimed
 - service marks claimed payments settled
 - service writes `payment.settled` outbox events
+- service recovers stale processing batches
 - settlement worker window calculation
 - settlement worker config parsing
 - Postgres service integration for settled payment and outbox event
 - Postgres batch create/get/update
 - Postgres captured-payment claim flow
+- Postgres stale processing batch lookup
+- Postgres claimed-payment lookup by batch
 - Postgres line item create/list
 - duplicate batch mapping
 - duplicate line item mapping
@@ -306,15 +318,15 @@ Defines the repository interface and repository-level errors for future adapters
 
 `internal/settlement/service.go`
 
-Creates settlement batches, starts processing, claims captured payments, creates line items, marks payments `SETTLED`, writes `payment.settled` outbox events, and completes the batch inside a transaction.
+Creates settlement batches, starts processing, claims captured payments, creates line items, marks payments `SETTLED`, writes `payment.settled` outbox events, completes the batch inside a transaction, and recovers stale processing batches.
 
 `internal/settlement/adapters/postgres/repository.go`
 
-Persists settlement batches and line items in PostgreSQL and participates in context-propagated transactions.
+Persists settlement batches and line items in PostgreSQL, lists stale processing batches, lists payments claimed by a batch, and participates in context-propagated transactions.
 
 `cmd/paycore-settlement-worker/main.go`
 
-Runs one settlement batch for the previous completed time window and exits.
+Recovers stale settlement batches, runs one settlement batch for the previous completed time window, and exits.
 
 `migrations/000006_create_settlements.sql`
 
@@ -333,6 +345,6 @@ Creates settlement batch and line item tables, adds `payments.settlement_batch_i
 - [x] Add payment `SETTLED` transition wiring.
 - [x] Add `payment.settled` outbox event creation.
 - [x] Add settlement worker command.
+- [x] Add stale batch recovery tests.
 - [ ] Add settlement HTTP endpoints.
-- [ ] Add stale batch recovery tests.
 - [ ] Add settlement metrics.

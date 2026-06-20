@@ -82,6 +82,56 @@ func TestRepositoryRejectsDuplicateBatch(t *testing.T) {
 	}
 }
 
+func TestRepositoryListsStaleProcessingBatches(t *testing.T) {
+	ctx := context.Background()
+	pool := newTestPool(t)
+	store := settlementpostgres.NewStore(pool)
+	prefix := testPrefix()
+	t.Cleanup(func() {
+		cleanupSettlementRows(t, pool, prefix)
+	})
+
+	stale := createBatch(t, store, prefix+"-batch-stale")
+	fresh := createBatch(t, store, prefix+"-batch-fresh")
+	created := createBatch(t, store, prefix+"-batch-created")
+
+	staleProcessing, err := stale.StartProcessing("old-worker", testNow().Add(-time.Minute), testNow().Add(-2*time.Minute))
+	if err != nil {
+		t.Fatalf("start stale batch: %v", err)
+	}
+	if _, err := store.UpdateBatch(ctx, staleProcessing); err != nil {
+		t.Fatalf("update stale batch: %v", err)
+	}
+
+	freshProcessing, err := fresh.StartProcessing("current-worker", testNow().Add(time.Minute), testNow())
+	if err != nil {
+		t.Fatalf("start fresh batch: %v", err)
+	}
+	if _, err := store.UpdateBatch(ctx, freshProcessing); err != nil {
+		t.Fatalf("update fresh batch: %v", err)
+	}
+
+	batches, err := store.ListStaleProcessingBatches(ctx, settlement.ListStaleProcessingBatchesInput{
+		Now:   testNow(),
+		Limit: 10,
+	})
+	if err != nil {
+		t.Fatalf("list stale batches: %v", err)
+	}
+
+	if len(batches) != 1 {
+		t.Fatalf("expected 1 stale batch, got %d", len(batches))
+	}
+
+	if batches[0].ID != stale.ID {
+		t.Fatalf("expected stale batch %q, got %q", stale.ID, batches[0].ID)
+	}
+
+	if batches[0].ID == fresh.ID || batches[0].ID == created.ID {
+		t.Fatalf("expected fresh and created batches to be excluded")
+	}
+}
+
 func TestRepositoryCreatesAndListsLineItems(t *testing.T) {
 	ctx := context.Background()
 	pool := newTestPool(t)
@@ -194,6 +244,60 @@ func TestRepositoryClaimsCapturedPaymentsInTransaction(t *testing.T) {
 	assertPaymentSettlementBatch(t, pool, prefix+"-payment-1", batch.ID)
 	assertPaymentSettlementBatch(t, pool, prefix+"-payment-2", batch.ID)
 	assertPaymentSettlementBatch(t, pool, prefix+"-payment-authorized", "")
+}
+
+func TestRepositoryListsClaimedPaymentsForBatch(t *testing.T) {
+	ctx := context.Background()
+	pool := newTestPool(t)
+	store := settlementpostgres.NewStore(pool)
+	transactor := db.NewPostgresTransactor(pool)
+	prefix := testPrefix()
+	t.Cleanup(func() {
+		cleanupSettlementRows(t, pool, prefix)
+	})
+
+	batch := createBatch(t, store, prefix+"-batch-1")
+	otherBatch := createBatch(t, store, prefix+"-batch-2")
+	createPaymentFixture(t, pool, prefix+"-merchant-1", prefix+"-payer-1", prefix+"-payment-1")
+	createPaymentFixture(t, pool, prefix+"-merchant-1", prefix+"-payer-2", prefix+"-payment-2")
+
+	err := transactor.WithinTx(ctx, func(ctx context.Context) error {
+		if _, err := store.ClaimCapturedPayments(ctx, settlement.ClaimCapturedPaymentsInput{
+			BatchID:     batch.ID,
+			WindowStart: testNow().Add(-time.Hour),
+			WindowEnd:   testNow().Add(time.Hour),
+			Limit:       1,
+			Now:         testNow(),
+		}); err != nil {
+			return err
+		}
+
+		_, err := store.ClaimCapturedPayments(ctx, settlement.ClaimCapturedPaymentsInput{
+			BatchID:     otherBatch.ID,
+			WindowStart: testNow().Add(-time.Hour),
+			WindowEnd:   testNow().Add(time.Hour),
+			Limit:       1,
+			Now:         testNow(),
+		})
+
+		return err
+	})
+	if err != nil {
+		t.Fatalf("claim payment fixtures: %v", err)
+	}
+
+	claimed, err := store.ListClaimedPayments(ctx, batch.ID)
+	if err != nil {
+		t.Fatalf("list claimed payments: %v", err)
+	}
+
+	if len(claimed) != 1 {
+		t.Fatalf("expected 1 claimed payment, got %d", len(claimed))
+	}
+
+	if claimed[0].SettlementBatch != batch.ID {
+		t.Fatalf("expected settlement batch %q, got %q", batch.ID, claimed[0].SettlementBatch)
+	}
 }
 
 func TestRepositoryClaimCapturedPaymentsRequiresTransaction(t *testing.T) {

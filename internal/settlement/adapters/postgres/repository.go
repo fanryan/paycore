@@ -152,6 +152,54 @@ func (s *Store) UpdateBatch(ctx context.Context, batch settlement.Batch) (settle
 	return updated, nil
 }
 
+func (s *Store) ListStaleProcessingBatches(ctx context.Context, input settlement.ListStaleProcessingBatchesInput) ([]settlement.Batch, error) {
+	if input.Limit <= 0 {
+		return []settlement.Batch{}, nil
+	}
+
+	const query = `
+		SELECT
+			id,
+			status,
+			window_start,
+			window_end,
+			claimed_by,
+			locked_until,
+			completed_at,
+			last_error,
+			created_at,
+			updated_at
+		FROM settlement_batches
+		WHERE status = 'PROCESSING'
+		AND locked_until <= $1
+		ORDER BY locked_until ASC, created_at ASC, id ASC
+		LIMIT $2
+		FOR UPDATE SKIP LOCKED
+	`
+
+	rows, err := s.query(ctx, query, input.Now.UTC(), input.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	batches := make([]settlement.Batch, 0)
+	for rows.Next() {
+		batch, err := scanBatch(rows)
+		if err != nil {
+			return nil, err
+		}
+
+		batches = append(batches, batch)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return batches, nil
+}
+
 func (s *Store) ClaimCapturedPayments(ctx context.Context, input settlement.ClaimCapturedPaymentsInput) ([]settlement.ClaimedPayment, error) {
 	if input.Limit <= 0 {
 		return []settlement.ClaimedPayment{}, nil
@@ -198,6 +246,44 @@ func (s *Store) ClaimCapturedPayments(ctx context.Context, input settlement.Clai
 		input.BatchID,
 		input.Now.UTC(),
 	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	claimed := make([]settlement.ClaimedPayment, 0)
+	for rows.Next() {
+		payment, err := scanClaimedPayment(rows)
+		if err != nil {
+			return nil, err
+		}
+
+		claimed = append(claimed, payment)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return claimed, nil
+}
+
+func (s *Store) ListClaimedPayments(ctx context.Context, batchID string) ([]settlement.ClaimedPayment, error) {
+	const query = `
+		SELECT
+			id,
+			merchant_id,
+			amount_minor,
+			currency,
+			captured_at,
+			settlement_batch_id
+		FROM payments
+		WHERE settlement_batch_id = $1
+		AND status = 'CAPTURED'
+		ORDER BY captured_at ASC, id ASC
+	`
+
+	rows, err := s.query(ctx, query, batchID)
 	if err != nil {
 		return nil, err
 	}
