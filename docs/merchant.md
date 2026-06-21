@@ -1,6 +1,6 @@
 # Merchant
 
-This document explains the current PayCore merchant implementation as it exists today. It is written for resume and interview preparation, so it focuses on how the code works, what decisions were made, what is intentionally still in-memory, and what is planned next.
+This document explains the current PayCore merchant implementation as it exists today. It is written for resume and interview preparation, so it focuses on how the code works, what decisions were made, and how the merchant feature fits into payment authorization.
 
 ## 1. Current Merchant Scope
 
@@ -29,15 +29,14 @@ The Go API currently supports the merchant foundation:
 - Merchant create and list routes composed through `internal/http/router.go`.
 - Entity, service, handler, router, and in-memory repository tests.
 
-### Not Implemented Yet
+### Future Hardening
 
-These are planned but not currently implemented:
+These items are outside the current portfolio milestone:
 
-- Runtime wiring from the API to the PostgreSQL merchant repository.
 - Merchant authentication and authorization rules.
 - Merchant status update endpoints.
 - Merchant rate-limit tiers.
-- Merchant integration with payment authorization.
+- Dedicated `GET /merchants/{merchant_id}` endpoint.
 
 ### Public Endpoints
 
@@ -53,7 +52,7 @@ GET  /merchants
 
 None currently.
 
-Authentication and protected merchant administration endpoints have not been implemented yet.
+Authentication and protected merchant administration endpoints are outside the current local systems milestone.
 
 ## 2. Runtime Flow
 
@@ -110,7 +109,17 @@ The feature package owns merchant rules and HTTP request/response mapping. The c
 
 ### Current Service Input
 
-There is no HTTP request contract yet. The current service input is:
+Current HTTP request:
+
+```json
+{
+  "id": "merchant-1",
+  "name": "Demo Merchant",
+  "settlement_currency": "USD"
+}
+```
+
+Current service input:
 
 ```go
 merchant.CreateMerchantInput{
@@ -193,7 +202,7 @@ POST /merchants
 GET  /merchants
 ```
 
-`GET /merchants/{merchant_id}` is planned but not implemented.
+The current public merchant API supports creation and listing. Single-record lookup is available internally through the repository and service boundary.
 
 Handler flow:
 
@@ -238,17 +247,15 @@ It uses a mutex for concurrent map access and checks `context.Context` before wo
 
 This adapter is useful for local API development before PostgreSQL exists. It is not durable.
 
-### Planned PostgreSQL Adapter
+### PostgreSQL Adapter
 
-PostgreSQL persistence is planned but not implemented.
-
-Planned file:
+PostgreSQL persistence is implemented in:
 
 ```text
 internal/merchant/adapters/postgres/repository.go
 ```
 
-Planned durable fields:
+Durable fields:
 
 - merchant id
 - name
@@ -305,13 +312,3 @@ Owns merchant HTTP request parsing, response mapping, and HTTP error mapping.
 `internal/merchant/adapters/postgres/repository.go`
 
 Planned. Will own durable PostgreSQL merchant persistence.
-
-## Checklist
-
-- [x] Add merchant HTTP handler.
-- [x] Register merchant routes in `internal/http/router.go`.
-- [x] Add merchant handler tests.
-- [x] Add PostgreSQL migration for merchants.
-- [x] Add PostgreSQL merchant repository.
-- [x] Wire API runtime to PostgreSQL merchant repository.
-- [ ] Document final merchant request and response contracts.

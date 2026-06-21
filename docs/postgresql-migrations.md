@@ -1,6 +1,6 @@
 # PostgreSQL Migrations
 
-This document explains the current PayCore PostgreSQL migration foundation as it exists today. It is written for resume and interview preparation, so it focuses on the schema decisions currently captured in SQL, what is intentionally not wired yet, and what is planned next.
+This document explains the current PayCore PostgreSQL migration foundation as it exists today. It is written for resume and interview preparation, so it focuses on the schema decisions captured in SQL and how the schema supports durable payment, idempotency, outbox, and settlement state.
 
 ## 1. Current Migration Scope
 
@@ -31,13 +31,12 @@ The migrations define:
 - Settlement double-settlement constraints.
 - Timestamp columns for creation and update time.
 
-### Not Implemented Yet
+### Out Of Scope And Future Hardening
 
-These are planned but not currently implemented:
+These items are outside the current local-first milestone:
 
 - Automatic migration execution in app startup.
 - Single transaction that also includes idempotency completion.
-- Settlement repository adapter and worker runtime.
 
 ## 2. Migration Files
 
@@ -93,7 +92,7 @@ Current constraints:
 - `version` must be non-negative.
 - `currency` must be uppercase.
 
-The `version` column exists for upcoming optimistic concurrency checks in the durable payer repository.
+The `version` column supports optimistic concurrency checks in the durable payer repository.
 
 ## 5. Payment And Hold Schema
 
@@ -277,7 +276,7 @@ PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=
 go run ./cmd/paycore-api
 ```
 
-In Postgres mode, merchant, payer, payment, hold, idempotency, and outbox repositories use PostgreSQL. Settlement tables exist, but the settlement repository adapter is not implemented yet.
+In Postgres mode, merchant, payer, payment, hold, idempotency, outbox, and settlement repositories use PostgreSQL.
 
 ## 11. Manual Usage
 
@@ -294,18 +293,3 @@ PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=
 ```
 
 Run the command repeatedly as needed. Already-applied migrations are skipped.
-
-## Checklist
-
-- [x] Add merchant table migration.
-- [x] Add payer table migration.
-- [x] Add payment and hold migrations.
-- [x] Add idempotency record migration.
-- [x] Add outbox event migration.
-- [x] Add settlement migration.
-- [x] Add migration runner.
-- [x] Add PostgreSQL repository adapters.
-- [x] Wire API runtime to PostgreSQL repository adapters.
-- [x] Add Postgres-backed HTTP lifecycle smoke test.
-- [x] Add transaction boundary around authorization and capture business mutations.
-- [ ] Include durable idempotency completion in the transaction boundary.

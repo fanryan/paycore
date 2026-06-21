@@ -4,6 +4,12 @@ PayCore is a production-inspired payment gateway and settlement engine built as 
 
 The long-term goal is to model high-throughput payment infrastructure with idempotent payment authorization and capture, Redis-backed admission control, PostgreSQL-backed durable state, Kafka lifecycle event publishing, settlement batch processing, and Prometheus observability.
 
+## Project Snapshot
+
+PayCore is now at a portfolio-ready milestone. It demonstrates payment lifecycle state management, durable idempotency, Redis-backed admission control, PostgreSQL-backed balances and holds, service-level transactions, transactional outbox publishing, settlement recovery, Prometheus observability, and k6 load testing.
+
+Known next hardening areas are documented rather than hidden: transactional idempotency completion, authentication, dashboards/alerts, longer soak tests, and production deployment concerns.
+
 ## Goals
 
 PayCore is designed to demonstrate:
@@ -19,67 +25,27 @@ PayCore is designed to demonstrate:
 - Event-driven integration with LedgerFlow
 - High-throughput API design and observability
 
-## Current Status
+## Capabilities
 
-Current development stage:
+PayCore currently includes:
 
-- Initial repository setup completed
-- Go module initialized
-- PayCore API service skeleton implemented
-- Health, readiness, and version endpoints implemented
-- Request ID middleware implemented
-- Structured JSON request logging implemented
-- Panic recovery middleware implemented
-- Request body size limit middleware implemented
-- JSON error response shape introduced
-- Configuration loading implemented for environment, HTTP server settings, PostgreSQL URL, Redis address, and Kafka brokers
-- Feature-first package layout introduced for merchant and payer modules
-- Merchant entity, service, repository interface, and in-memory adapter implemented
-- Payer entity, service, repository interface, and in-memory adapter implemented
-- PostgreSQL repository adapters implemented for merchant, payer, payment, holds, idempotency records, and outbox events
-- PostgreSQL merchant, payer, payment, hold, idempotency, outbox, and settlement schema migrations added
-- Runtime repository backend switch implemented with `PAYCORE_REPOSITORY_BACKEND=memory|postgres`
-- Shared transactor added for Postgres transaction propagation through `context.Context`
-- Transactional outbox foundation implemented for `payment.authorized`, `payment.captured`, and `payment.expired` events
-- Outbox claim/retry repository methods implemented with PostgreSQL `FOR UPDATE SKIP LOCKED`
-- Outbox worker can publish through the local logging publisher or Kafka publisher adapter
-- Merchant HTTP create and list endpoints implemented
-- Payer HTTP create and list endpoints implemented
-- Payer balance reservation, release, and held-capture behavior implemented
-- Payment entity, authorization hold entity, repository interface, and in-memory adapter implemented
-- In-memory idempotency record, service, repository interface, and memory adapter implemented
-- Redis-backed idempotency response cache implemented as an optional replay acceleration layer
-- Payment authorization HTTP endpoint implemented with local in-memory `Idempotency-Key` enforcement
-- Payment capture service and HTTP endpoint implemented with local in-memory `Idempotency-Key` enforcement
-- Payment authorization expiry service and one-shot expiry worker implemented for releasing expired holds
-- Redis-backed fixed-window rate limiting implemented for payment mutation routes
-- Settlement batch and line item domain foundation implemented
-- Settlement schema migration added with double-settlement guards
-- PostgreSQL settlement repository adapter implemented
-- Settlement service implemented for batch creation, captured-payment claims, line items, payment `SETTLED` transitions, `payment.settled` outbox events, and batch completion
-- One-shot settlement worker implemented for previous-window batch creation
-- Settlement stale batch recovery implemented by resuming expired `PROCESSING` batches before new work
-- Prometheus metrics foundation implemented for API HTTP requests, settlement batches, settlement recovery, and outbox publishing
-- Outbox pending-event and publish-lag metrics implemented for backlog visibility
-- Rate-limit metrics implemented for allowed, rejected, Redis error, and check duration paths
-- Idempotency cache metrics implemented for hits, misses, errors, and durable fallback paths
-- Payment authorization and capture metrics implemented for result counts and service latency
-- Payer optimistic-lock conflict metrics implemented for balance mutation contention visibility
-- API exposes `GET /metrics`; outbox and settlement workers expose `/metrics` on `PAYCORE_METRICS_ADDR`
-- Shared currency normalization and validation implemented
-- Shared random id helper implemented
-- Central HTTP router migrated to chi for path parameters and feature route composition
-- Docker Compose local PostgreSQL, Redis, and Kafka infrastructure added
-- `.env.example` added for local runtime configuration
-- k6 payment happy-path and idempotency replay load tests added
-- HTTP API foundation and middleware tests added
-- Configuration tests added
-- Merchant and payer unit tests added
-- Merchant and payer handler tests added
-- Payment service, handler, repository, entity, hold, idempotency, and router tests added
-- Postgres-backed HTTP smoke test added for merchant creation, payer creation, authorization, capture, persisted payment reload, and outbox event creation
+- Merchant and payer APIs
+- Payment authorization, capture, and authorization expiry
+- Integer minor-unit balances with authorization holds
+- Durable PostgreSQL repositories and migrations
+- Service-level PostgreSQL transactions with context propagation
+- Durable idempotency records with optional Redis response caching
+- Redis-backed fixed-window rate limiting for payment mutations
+- Transactional outbox events for payment and settlement lifecycle changes
+- Logging and Kafka outbox publishers
+- Settlement batching with stale-batch recovery
+- Prometheus metrics for API, payments, idempotency, rate limiting, outbox, settlement, and payer contention
+- Docker Compose local infrastructure for PostgreSQL, Redis, Kafka, and Prometheus
+- k6 load tests for happy path, idempotency replay, rate limiting, payer contention, and settlement/outbox backlog
 
-Implemented endpoints:
+Detailed implementation notes live in `docs/`. Start with `docs/architecture.md`, `docs/architecture-tradeoffs.md`, `docs/payment.md`, `docs/failure-modes.md`, and `docs/performance-results.md`.
+
+## API Endpoints
 
 ```text
 GET /healthz
@@ -94,9 +60,13 @@ POST /payments/authorize
 POST /payments/{payment_id}/capture
 ```
 
-Runtime wiring to PostgreSQL repositories is available through `PAYCORE_REPOSITORY_BACKEND=postgres`. Memory repositories remain the default. Redis-backed rate limiting, Redis-backed idempotency response caching, and Kafka-backed outbox publishing are implemented but opt-in. Settlement domain, schema, repository, service, one-shot worker, and stale batch recovery are implemented. Prometheus metrics are exposed by the API and workers, and local Prometheus scraping is configured through Docker Compose. Grafana dashboards and settlement HTTP APIs have not been implemented yet.
+## Runtime Modes
 
-Payment authorization and capture enforce `Idempotency-Key`. In memory mode, idempotency records are process-local. In Postgres mode, merchant, payer, payment, hold, idempotency, and outbox records use PostgreSQL repositories. Payment authorization and capture business mutations plus outbox event creation run through a service-level transaction boundary in Postgres mode. Redis-backed rate limiting fails closed if Redis is unavailable. Redis-backed idempotency caching falls back to durable records if Redis is unavailable.
+- Memory repositories are the default for quick local API runs.
+- PostgreSQL repositories are enabled with `PAYCORE_REPOSITORY_BACKEND=postgres`.
+- Redis rate limiting is opt-in and fails closed when enabled but unavailable.
+- Redis idempotency caching is opt-in and falls back to durable PostgreSQL records.
+- Kafka publishing is opt-in through the outbox worker; PostgreSQL remains the source of truth.
 
 ## Run Locally
 
@@ -218,8 +188,8 @@ Supported local configuration:
 | `PAYCORE_HTTP_SHUTDOWN_TIMEOUT_SECONDS` | `10` | Graceful shutdown timeout in seconds |
 | `PAYCORE_REPOSITORY_BACKEND` | `memory` | Repository backend: `memory` or `postgres` |
 | `PAYCORE_DATABASE_URL` | empty | PostgreSQL connection string for migrations and repository adapters |
-| `PAYCORE_REDIS_ADDR` | `localhost:6379` | Redis address loaded for upcoming rate limiting and cache adapters |
-| `PAYCORE_KAFKA_BROKERS` | `localhost:9092` | Kafka broker list loaded for upcoming outbox publisher adapter |
+| `PAYCORE_REDIS_ADDR` | `localhost:6379` | Redis address used by rate limiting and idempotency cache adapters |
+| `PAYCORE_KAFKA_BROKERS` | `localhost:9092` | Kafka broker list used by the outbox publisher adapter |
 | `PAYCORE_KAFKA_OUTBOX_TOPIC` | `paycore.outbox.events` | Kafka topic used by the outbox publisher adapter |
 | `PAYCORE_OUTBOX_PUBLISHER` | `logging` | Outbox publisher backend: `logging` or `kafka` |
 | `PAYCORE_RATE_LIMIT_ENABLED` | `false` | Enables Redis-backed rate limiting for payment mutation routes |
@@ -384,138 +354,29 @@ To run the k6 idempotency replay load test:
 k6 run loadtest/idempotency_replay.js
 ```
 
-## Current Repository Structure
+## Repository Map
 
 ```text
 paycore/
   cmd/
-    paycore-api/
-      main.go
-      main_test.go
-    paycore-outbox-worker/
-      main.go
-    paycore-settlement-worker/
-      main.go
-      main_test.go
-    paycore-migrate/
-      main.go
+    paycore-api/                # HTTP API
+    paycore-migrate/            # PostgreSQL migrations
+    paycore-outbox-worker/      # Outbox publisher
+    paycore-expiry-worker/      # Authorization expiry
+    paycore-settlement-worker/  # Settlement batches
   internal/
-    idempotency/
-      record.go
-      record_test.go
-      repository.go
-      service.go
-      service_test.go
-      adapters/
-        memory/
-          repository.go
-          repository_test.go
-        postgres/
-          repository.go
-          repository_test.go
-    http/
-      middleware.go
-      router.go
-      router_test.go
-      system_handler.go
-    merchant/
-      entity.go
-      handler.go
-      repository.go
-      service.go
-      adapters/
-        memory/
-          repository.go
-        postgres/
-          repository.go
-          repository_test.go
-    outbox/
-      event.go
-      event_test.go
-      publisher.go
-      repository.go
-      worker.go
-      worker_test.go
-      adapters/
-        memory/
-          repository.go
-          repository_test.go
-        postgres/
-          repository.go
-          repository_test.go
-    payer/
-      entity.go
-      handler.go
-      repository.go
-      service.go
-      adapters/
-        memory/
-          repository.go
-        postgres/
-          repository.go
-          repository_test.go
-    payment/
-      entity.go
-      entity_test.go
-      handler.go
-      handler_test.go
-      hold.go
-      hold_test.go
-      repository.go
-      response_recorder.go
-      service.go
-      service_test.go
-      adapters/
-        memory/
-          repository.go
-          repository_test.go
-        postgres/
-          repository.go
-          repository_test.go
-    settlement/
-      entity.go
-      entity_test.go
-      repository.go
-      adapters/
-        postgres/
-          repository.go
-          repository_test.go
-    shared/
-      config/
-        config.go
-        config_test.go
-      currency/
-        currency.go
-        currency_test.go
-      db/
-        postgres_transactor.go
-        postgres_transactor_test.go
-        transactor.go
-      httpjson/
-        response.go
-      id/
-        id.go
-  docs/
-    architecture.md
-    idempotency.md
-    local-infrastructure.md
-    merchant.md
-    outbox.md
-    payer.md
-    payment.md
-    postgresql-migrations.md
-    settlement.md
-  migrations/
-    000001_create_merchants.sql
-    000002_create_payers.sql
-    000003_create_payments.sql
-    000004_create_idempotency_records.sql
-    000005_create_outbox_events.sql
-    000006_create_settlements.sql
-  go.mod
-  docker-compose.yml
-  .env.example
-  README.md
+    http/                       # Router and middleware
+    merchant/                   # Merchant feature
+    payer/                      # Payer balances
+    payment/                    # Authorization, capture, expiry
+    idempotency/                # Durable request replay
+    outbox/                     # Transactional event publishing
+    settlement/                 # Settlement batches and recovery
+    ratelimit/                  # Redis admission control
+    shared/                     # Config, db, metrics, helpers
+  loadtest/                     # k6 scenarios
+  migrations/                   # PostgreSQL schema
+  docs/                         # Architecture and feature docs
 ```
 
 ## Target Architecture
@@ -571,7 +432,7 @@ stateDiagram-v2
     CAPTURED --> SETTLED
 ```
 
-## Planned Implementation Sequence
+## Implementation Sequence
 
 1. API foundation and configuration
 2. Merchant and payer domain models
@@ -595,12 +456,16 @@ Current documentation:
 
 - `docs/architecture.md`
 - `docs/architecture-tradeoffs.md`
+- `docs/failure-modes.md`
 - `docs/idempotency.md`
 - `docs/load-testing.md`
 - `docs/local-infrastructure.md`
 - `docs/merchant.md`
+- `docs/metrics.md`
+- `docs/outbox.md`
 - `docs/payer.md`
 - `docs/payment.md`
+- `docs/performance-results.md`
 - `docs/postgresql-migrations.md`
 - `docs/rate-limiting.md`
 - `docs/settlement.md`
@@ -608,7 +473,16 @@ Current documentation:
 Planned documentation:
 
 - `docs/payment-lifecycle.md`
-- `docs/idempotency.md`
-- `docs/outbox.md`
-- `docs/failure-modes.md`
-- `docs/performance-results.md`
+
+## Known Limitations And Next Hardening
+
+PayCore intentionally stops short of real payment rails, card networks, bank integrations, and production authentication.
+
+Important next hardening areas:
+
+- Move durable idempotency completion into the same PostgreSQL transaction as payment mutation and outbox writes.
+- Add authentication and authorization around operational endpoints.
+- Add Grafana dashboards and alert rules for outbox lag, Redis errors, payer conflict spikes, and API latency.
+- Add longer soak tests and repeatable benchmark reset tooling.
+- Add deployment manifests if moving beyond local Docker Compose.
+- Add explicit payment read APIs such as `GET /payments/{payment_id}`.

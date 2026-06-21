@@ -1,6 +1,6 @@
 # Rate Limiting
 
-This document explains the current PayCore rate limiting implementation as it exists today. It is written for resume and interview preparation, so it focuses on how the code works, what decisions were made, and what is still planned.
+This document explains the current PayCore rate limiting implementation as it exists today. It is written for resume and interview preparation, so it focuses on how the code works, what decisions were made, and how Redis-backed admission control protects payment mutation routes.
 
 ## 1. Current Feature Scope
 
@@ -17,12 +17,13 @@ This document explains the current PayCore rate limiting implementation as it ex
 - Redis adapter constructor tests.
 - Opt-in Redis integration test for fixed-window behavior.
 
-### Not Implemented Yet
+### Future Hardening
+
+These items are outside the current portfolio milestone:
 
 - Per-merchant or per-account tiered limits.
 - Sliding-window or token-bucket smoothing.
 - Redis cluster/sentinel configuration.
-- Prometheus metrics for allowed, blocked, and unavailable checks.
 - Admin endpoint for inspecting rate-limit state.
 
 ### Public Endpoints
@@ -40,7 +41,7 @@ POST /payments/authorize
 POST /payments/{payment_id}/capture
 ```
 
-Merchant and payer routes are not rate limited yet.
+Merchant and payer routes are intentionally not rate limited in this project; the limiter is focused on payment mutation routes where admission control protects balance-changing workflows.
 
 ## 2. Runtime Flow
 
@@ -222,15 +223,3 @@ Creates the Redis client and limiter when `PAYCORE_RATE_LIMIT_ENABLED=true`.
 `internal/shared/config/config.go`
 
 Loads rate-limit configuration from environment variables.
-
-## Checklist
-
-- [x] Add rate limiter interface.
-- [x] Add Redis fixed-window limiter.
-- [x] Wire limiter into payment mutation routes.
-- [x] Fail closed when Redis is unavailable.
-- [x] Add router tests.
-- [x] Add Redis adapter tests.
-- [ ] Add Prometheus metrics.
-- [ ] Add per-merchant or per-tier limits.
-- [ ] Consider token-bucket or sliding-window algorithm.

@@ -1,6 +1,6 @@
 # Local Infrastructure
 
-This document explains the current PayCore local infrastructure setup as it exists today. It is written for resume and interview preparation, so it focuses on what runs locally, what each dependency is for, what is wired into the app today, and what is planned next.
+This document explains the current PayCore local infrastructure setup as it exists today. It is written for resume and interview preparation, so it focuses on what runs locally, what each dependency is for, and what is wired into the app.
 
 ## 1. Current Infrastructure Scope
 
@@ -33,9 +33,9 @@ paycore-kafka
 paycore-prometheus
 ```
 
-### Not Implemented Yet
+### Out Of Scope
 
-These are planned but not currently implemented:
+These items are outside the current local-first milestone:
 
 - Grafana.
 - Dockerized PayCore API service.
@@ -44,7 +44,7 @@ These are planned but not currently implemented:
 
 ### PostgreSQL
 
-PostgreSQL is planned to become the durable source of truth for:
+PostgreSQL is the durable source of truth for:
 
 - merchant records
 - payer balances
@@ -62,7 +62,7 @@ postgres://paycore:paycore@localhost:5432/paycore?sslmode=disable
 
 ### Redis
 
-Redis is planned for:
+Redis is used for:
 
 - rate limiting
 - idempotency response caching
@@ -72,7 +72,7 @@ Redis-backed rate limiting is implemented for payment mutation routes when `PAYC
 
 ### Kafka
 
-Kafka is planned for asynchronous lifecycle event delivery after durable PostgreSQL commits.
+Kafka is used for asynchronous lifecycle event delivery after durable PostgreSQL commits.
 
 The local broker exists now so the outbox publisher adapter can be run against a repeatable dependency. The outbox worker defaults to a logging publisher, but can publish to Kafka when `PAYCORE_OUTBOX_PUBLISHER=kafka`.
 
@@ -236,31 +236,3 @@ Documents how local services fit into the project roadmap.
 `cmd/paycore-migrate`
 
 Applies local PostgreSQL migrations and records applied files in `schema_migrations`.
-
-## Checklist
-
-- [x] Add Docker Compose PostgreSQL service.
-- [x] Add Docker Compose Redis service.
-- [x] Add local persistent Docker volumes.
-- [x] Add service health checks.
-- [x] Add `.env.example`.
-- [x] Add database config loading.
-- [x] Add Redis config loading.
-- [x] Add Kafka config loading.
-- [x] Add Kafka outbox topic config loading.
-- [x] Add outbox publisher backend config loading.
-- [x] Add Redis rate-limit config loading.
-- [x] Add Redis idempotency cache config loading.
-- [x] Add PostgreSQL merchant and payer migrations.
-- [x] Add PostgreSQL payment and idempotency migrations.
-- [x] Add PostgreSQL settlement migrations.
-- [x] Add migration runner.
-- [x] Add PostgreSQL repository adapters.
-- [x] Wire API runtime to PostgreSQL repository adapters.
-- [x] Add Kafka service.
-- [x] Add Kafka-backed outbox publisher.
-- [x] Add Redis rate limiter.
-- [x] Add Redis idempotency response cache.
-- [x] Add Prometheus service.
-- [x] Add Prometheus scrape configuration.
-- [ ] Add Grafana service.

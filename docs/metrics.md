@@ -1,6 +1,6 @@
 # Metrics
 
-This document explains the current PayCore Prometheus metrics implementation as it exists today. It is written for resume and interview preparation, so it focuses on how the code works, what decisions were made, and what is still planned.
+This document explains the current PayCore Prometheus metrics implementation as it exists today. It is written for resume and interview preparation, so it focuses on how the code works, what decisions were made, and how observability supports payment operations.
 
 ## 1. Current Feature Scope
 
@@ -59,9 +59,9 @@ This document explains the current PayCore Prometheus metrics implementation as 
   - payment service metrics through a fake recorder
   - outbox worker metrics through a fake recorder
 
-### Not Implemented Yet
+### Out Of Scope
 
-- Grafana dashboards.
+- Grafana dashboards are outside the current repository milestone. Prometheus metrics and scrape configuration are implemented; dashboard JSON can be added as a later operational packaging step.
 
 ### Public Endpoints
 
@@ -93,7 +93,7 @@ http://localhost:9090/targets
 
 ### Protected Endpoints Or Protected By Default
 
-Metrics endpoints are not authenticated yet. In production, metrics should be exposed only on an internal network, sidecar port, or protected route.
+Metrics endpoints are unauthenticated in the local-first setup. In production, metrics should be exposed only on an internal network, sidecar port, or protected route.
 
 ## 2. Runtime Flow
 
@@ -312,19 +312,3 @@ Defines the local Prometheus service.
 `prometheus.yml`
 
 Defines local scrape targets for host-run PayCore processes.
-
-## Checklist
-
-- [x] Add Prometheus client dependency.
-- [x] Add shared metrics registry.
-- [x] Expose API `/metrics`.
-- [x] Add HTTP request count and duration metrics.
-- [x] Add settlement metrics.
-- [x] Add outbox metrics.
-- [x] Expose worker `/metrics` endpoints.
-- [x] Add Prometheus to Docker Compose.
-- [x] Add scrape configuration.
-- [x] Add Redis rate-limit metrics.
-- [x] Add Redis idempotency cache metrics.
-- [x] Add outbox lag metrics.
-- [ ] Add dashboards or dashboard screenshots.

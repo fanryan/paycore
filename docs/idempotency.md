@@ -1,6 +1,6 @@
 # Idempotency
 
-This document explains the current PayCore idempotency implementation as it exists today. It is written for resume and interview preparation, so it focuses on how the code works, what decisions were made, what is durable, what Redis accelerates, and what is planned next.
+This document explains the current PayCore idempotency implementation as it exists today. It is written for resume and interview preparation, so it focuses on how the code works, what decisions were made, what is durable, and what Redis accelerates.
 
 ## 1. Current Idempotency Scope
 
@@ -33,15 +33,15 @@ The Go API currently supports durable idempotency records with optional Redis re
 - Optional Redis response caching through `PAYCORE_IDEMPOTENCY_CACHE_ENABLED=true`.
 - Unit tests for record behavior, memory repository behavior, service behavior, payment handler behavior, and router behavior.
 
-### Not Implemented Yet
+### Future Hardening
 
-These are planned but not currently implemented:
+These items are outside the current portfolio milestone:
 
 - Request hash canonicalization beyond raw request body hashing.
 - Durable recovery for `IN_PROGRESS` records after process crash.
 - Failed response persistence policy.
-- Idempotency metrics.
 - Idempotency cleanup worker.
+- Moving idempotency completion into the same PostgreSQL transaction as payment mutation.
 
 ### Public Endpoints
 
@@ -371,19 +371,3 @@ Provides the Redis response cache implementation.
 `internal/payment/response_recorder.go`
 
 Captures response status and body for payment authorization and capture replay.
-
-## Checklist
-
-- [x] Add idempotency record entity.
-- [x] Add idempotency repository interface.
-- [x] Add in-memory idempotency repository.
-- [x] Add idempotency service.
-- [x] Enforce `Idempotency-Key` on payment authorization.
-- [x] Replay same key and same request hash.
-- [x] Reject same key and different request hash.
-- [x] Enforce `Idempotency-Key` on payment capture.
-- [x] Add PostgreSQL idempotency record migration.
-- [x] Add PostgreSQL durable idempotency repository.
-- [x] Wire API runtime to PostgreSQL idempotency repository.
-- [x] Add Redis idempotency response cache.
-- [ ] Add idempotency metrics.

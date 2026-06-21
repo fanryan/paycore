@@ -203,14 +203,14 @@ There should be:
 - One Markdown file per major system design or feature.
 - `README.md` for current status, run commands, current repo shape, and high-level target architecture.
 
-Feature docs should follow the style of `/Users/fan/ledgerflow/docs/authentication.md`: explain the current implementation as it exists today, write for resume/interview review, and include explicit placeholders for planned sections that are not implemented yet.
+Feature docs should follow the style of `/Users/fan/ledgerflow/docs/authentication.md`: explain the current implementation as it exists today, write for resume/interview review, and use `Out Of Scope` or `Future Hardening` sections for optional work outside the current milestone.
 
 Preferred feature-doc sections:
 
 ```md
 # Feature Name
 
-This document explains the current PayCore <feature> implementation as it exists today. It is written for resume and interview preparation, so it focuses on how the code works, what decisions were made, and what is still planned.
+This document explains the current PayCore <feature> implementation as it exists today. It is written for resume and interview preparation, so it focuses on how the code works, what decisions were made, and what was deliberately scoped.
 
 ## 1. Current Feature Scope
 
@@ -218,9 +218,9 @@ This document explains the current PayCore <feature> implementation as it exists
 
 - Concrete implemented items with file paths, endpoint names, status values, tables, and tests where applicable.
 
-### Not Implemented Yet
+### Out Of Scope Or Future Hardening
 
-- Planned but not implemented items. Be explicit when a handler, route, adapter, migration, or external dependency does not exist yet.
+- Optional hardening work or deliberately excluded items. Be explicit when auth/admin endpoints, dashboards, managed infrastructure, or external integrations are outside the current scope.
 
 ### Public Endpoints
 
@@ -228,7 +228,7 @@ List public endpoints, or say none currently.
 
 ### Protected Endpoints Or Protected By Default
 
-List protected endpoints and required headers, or say auth is not implemented yet.
+List protected endpoints and required headers, or say auth is outside the current local systems milestone.
 
 ## 2. Runtime Flow
 
@@ -284,11 +284,11 @@ Use a plain text flow diagram.
 
 ### Failure Path
 
-List domain/service/repository errors and current or planned HTTP mappings.
+List domain/service/repository errors and current HTTP mappings, plus future hardening notes where useful.
 
-## 4. Additional Flow Or Planned HTTP Flow
+## 4. Additional Flow Or Secondary Flow
 
-Add secondary flows where relevant, such as refresh, reverse, capture, settlement, replay, authorization checks, or planned handler flow.
+Add secondary flows where relevant, such as refresh, reverse, capture, settlement, replay, authorization checks, or admin/operator flows.
 
 ## Validation And Errors
 
@@ -305,13 +305,9 @@ List current test coverage and command to run it.
 ## File Guide
 
 Explain which files own handler/controller, service, repository, model/entity, adapter, migration, and tests.
-
-## Checklist
-
-End with a concise checklist for planned next work.
 ```
 
-Not every doc needs every section, but keep the structure recognizable. If something is not implemented, include a clearly labeled placeholder instead of pretending it exists.
+Not every doc needs every section, but keep the structure recognizable. Use `Out Of Scope`, `Known Limitations`, or `Future Hardening` when something was deliberately excluded from the current milestone.
 
 ## Architecture Tradeoff Doc Style
 

@@ -1,6 +1,6 @@
 # Load Testing
 
-This document explains the current PayCore load testing setup as it exists today. It is written for resume and interview preparation, so it focuses on what the test exercises, how to run it locally, which metrics to inspect, and what is still planned.
+This document explains the current PayCore load testing setup as it exists today. It is written for resume and interview preparation, so it focuses on what the test exercises, how to run it locally, and which metrics to inspect.
 
 ## 1. Current Feature Scope
 
@@ -27,7 +27,7 @@ This document explains the current PayCore load testing setup as it exists today
 - Unique merchant, payer, authorization key, and capture key values are generated per virtual user iteration.
 - The script supports configurable base URL, virtual users, and duration through environment variables.
 
-### Not Implemented Yet
+### Out Of Scope
 
 - Automated CI load-test stage.
 - Docker Compose k6 service.
@@ -51,7 +51,7 @@ Payment mutation endpoints require:
 Idempotency-Key: <unique-key>
 ```
 
-Auth is not implemented yet.
+Authentication is outside the current local systems milestone.
 
 ## 2. Runtime Flow
 
@@ -251,73 +251,11 @@ paycore_settlement_batch_total
 paycore_settlement_payments_total
 ```
 
-## 6. Initial Baseline Result
+## 6. Recorded Results
 
-This baseline was captured from the current `payment_happy_path.js` script with:
+Measured local results live in `docs/performance-results.md`.
 
-```text
-5 VUs
-30 seconds
-PostgreSQL repository backend
-unique merchant and payer per iteration
-1 second sleep at the end of each iteration
-```
-
-### Functional Results
-
-All checks passed:
-
-| Check | Result |
-| --- | --- |
-| Merchant creation returned `201 Created` | 145 / 145 |
-| Payer creation returned `201 Created` | 145 / 145 |
-| Payment authorization returned `201 Created` | 145 / 145 |
-| Authorization returned `payment_id` | 145 / 145 |
-| Payment capture returned `200 OK` | 145 / 145 |
-| Capture response status was `CAPTURED` | 145 / 145 |
-| Total assertions | 870 / 870 |
-
-### HTTP Performance
-
-| Metric | Value |
-| --- | --- |
-| Total HTTP requests | 580 |
-| Request rate | about 19 requests/sec |
-| Failed requests | 0 / 580 |
-| Average latency | 11.95 ms |
-| Median latency | 9.34 ms |
-| p90 latency | 21.07 ms |
-| p95 latency | 27.06 ms |
-| Minimum latency | 0.98 ms |
-| Maximum latency | 123.32 ms |
-
-The current p95 was well below the script threshold of `500 ms`.
-
-### Throughput
-
-| Metric | Value |
-| --- | --- |
-| Completed iterations | 145 |
-| Iteration rate | about 4.75 iterations/sec |
-| Average iteration duration | 1.05 seconds, including `sleep(1)` |
-| Data received | 224 kB, about 7.3 kB/sec |
-| Data sent | 151 kB, about 4.9 kB/sec |
-
-This should be treated as an early local baseline, not a production capacity claim. The test currently creates fresh merchants and payers every iteration, so it measures end-to-end happy-path API behavior more than pure payment authorization throughput.
-
-## 7. Load Test Suite Result
-
-This suite result was captured by running the current load-test scripts as a group.
-
-| Scenario | VUs | Completed Iterations | Throughput | HTTP Error Rate | Checks Succeeded | p95 Latency |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| `payment_happy_path.js` | 5 | 25 | 18.86 reqs/sec | 0.00% | 100.00% (150/150) | 38.84 ms |
-| `idempotency_replay.js` | 3 | 15 | 14.45 reqs/sec | 20.00% | 100.00% (120/120) | 16.50 ms |
-| `rate_limit_pressure.js` | 10 | 454 | 89.30 reqs/sec | 57.23% | 100.00% (908/908) | 20.35 ms |
-| `payer_contention.js` | 20 | 1,699 | 335.98 reqs/sec | 60.96% | 100.00% (3400/3400) | 18.85 ms |
-| `settlement_outbox_backlog.js` | 10 | 386 | 302.95 reqs/sec | 0.00% | 100.00% (2316/2316) | 26.61 ms |
-
-The higher HTTP error rates in `idempotency_replay.js`, `rate_limit_pressure.js`, and `payer_contention.js` are expected. Those scenarios intentionally produce `409` and `429` responses to verify idempotency conflict handling, Redis rate limiting, and payer optimistic-lock conflict behavior. The important signal is that every scenario-specific check passed.
+This document intentionally focuses on how to run the scenarios and how to interpret their behavior. Keeping measured output in the performance-results document avoids two sources of truth when local benchmark numbers are refreshed.
 
 ## Validation And Errors
 
@@ -327,8 +265,6 @@ The first happy-path test is intentionally simple:
 - It avoids intentionally hitting rate limits.
 - It avoids intentionally reusing idempotency keys.
 - It treats failed HTTP checks as load-test failures.
-
-Later scenarios should deliberately test Redis rate-limit rejection and payer balance contention.
 
 Some scenarios intentionally produce HTTP `409` or `429` responses:
 
@@ -379,17 +315,7 @@ k6 run loadtest/idempotency_replay.js
 - `loadtest/payer_contention.js` owns the optimistic-lock contention scenario.
 - `loadtest/settlement_outbox_backlog.js` owns the captured-payment backlog generation scenario.
 - `loadtest/run_all.sh` runs the load-test scripts sequentially through the k6 Docker image.
-- `docs/load-testing.md` explains setup, runtime flow, metrics, and planned scenarios.
+- `docs/load-testing.md` explains setup, runtime flow, metrics, and scenario design.
 - `internal/shared/metrics/metrics.go` owns Prometheus collectors used to inspect the run.
 - `prometheus.yml` owns local scrape targets.
 - `docker-compose.yml` owns local PostgreSQL, Redis, Kafka, and Prometheus infrastructure.
-
-## Checklist
-
-- [x] Add payment happy-path load test.
-- [x] Document local load-test commands.
-- [x] Add initial 5 VU / 30 second baseline result.
-- [x] Add duplicate idempotency replay scenario.
-- [x] Add Redis rate-limit pressure scenario.
-- [x] Add payer optimistic-lock contention scenario.
-- [x] Add settlement/outbox backlog scenario.

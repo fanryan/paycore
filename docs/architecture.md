@@ -34,23 +34,29 @@ The current repository contains the first API foundation:
 - HTTP request metrics with route-pattern labels.
 - Settlement and outbox metrics.
 - Structured JSON error response shape.
-- Configuration loading from environment variables, including planned PostgreSQL and Redis settings.
+- Configuration loading from environment variables for API, PostgreSQL, Redis, Kafka, workers, and metrics.
 - Shared currency normalization and validation.
-- Merchant entity, service, repository interface, and in-memory adapter.
-- Payer entity, service, repository interface, and in-memory adapter.
+- Merchant entity, service, repository interface, HTTP handler, in-memory adapter, and PostgreSQL adapter.
+- Payer entity, service, repository interface, HTTP handler, in-memory adapter, and PostgreSQL adapter.
 - Merchant and payer HTTP handlers.
 - Merchant and payer routes composed through `internal/http`.
 - Payer balance mutation methods for reserve, release, and held capture.
-- Payment entity, authorization hold entity, repository interface, in-memory adapter, authorization service, and capture service.
+- Payment entity, authorization hold entity, repository interface, in-memory adapter, PostgreSQL adapter, authorization service, capture service, and expiry service.
 - Payment authorization and capture HTTP handlers.
-- In-memory idempotency record, repository interface, adapter, and service.
-- Local `Idempotency-Key` enforcement for payment authorization and capture.
-- Docker Compose local PostgreSQL and Redis services for upcoming infrastructure work.
-- PostgreSQL merchant, payer, payment, hold, and idempotency schema migrations.
+- Idempotency record entity, repository interface, service, in-memory adapter, PostgreSQL adapter, and Redis response cache.
+- `Idempotency-Key` enforcement for payment authorization and capture.
+- Redis-backed rate limiting for payment mutation routes.
+- Transactional outbox with memory and PostgreSQL adapters.
+- Kafka-backed outbox publisher and worker command.
+- Settlement batch entity, PostgreSQL repository, settlement service, and worker command.
+- Prometheus metrics for API, workers, payments, idempotency, rate limiting, outbox, and settlement.
+- k6 load-test scenarios for happy path, idempotency replay, rate limiting, payer contention, and settlement/outbox backlog.
+- Docker Compose local PostgreSQL, Redis, Kafka, and Prometheus services.
+- PostgreSQL merchant, payer, payment, hold, idempotency, outbox, and settlement schema migrations.
 - Local PostgreSQL migration runner at `cmd/paycore-migrate`.
 - Shared HTTP JSON response helper.
 - Shared random id helper.
-- Unit tests for HTTP routing, configuration loading, currency helpers, merchant behavior, and payer behavior.
+- Unit and integration tests across HTTP routing, configuration loading, currency helpers, domain services, repositories, idempotency, outbox, settlement, and metrics.
 
 Current supported configuration:
 
@@ -61,8 +67,10 @@ Current supported configuration:
 | `PAYCORE_METRICS_ADDR` | `:9091` | Metrics listen address used by worker commands |
 | `PAYCORE_HTTP_READ_HEADER_TIMEOUT_SECONDS` | `5` | HTTP read header timeout in seconds |
 | `PAYCORE_HTTP_SHUTDOWN_TIMEOUT_SECONDS` | `10` | Graceful shutdown timeout in seconds |
+| `PAYCORE_REPOSITORY_BACKEND` | `memory` | Repository backend: `memory` or `postgres` |
 | `PAYCORE_DATABASE_URL` | empty | PostgreSQL connection string for migrations and repository adapters |
-| `PAYCORE_REDIS_ADDR` | `localhost:6379` | Redis address loaded for upcoming rate limiting and cache adapters |
+| `PAYCORE_REDIS_ADDR` | `localhost:6379` | Redis address used by rate limiting and idempotency cache adapters |
+| `PAYCORE_KAFKA_BROKERS` | `localhost:9092` | Kafka broker list used by the outbox publisher adapter |
 
 ## High-Level Flow
 
@@ -222,13 +230,15 @@ In memory mode, these flows remain process-local and are not durable. In Postgre
 
 ## Current Local Infrastructure
 
-Docker Compose currently provides local PostgreSQL and Redis services:
+Docker Compose currently provides local PostgreSQL, Redis, Kafka, and Prometheus services:
 
 ```text
 paycore-postgres
 paycore-redis
+paycore-kafka
+paycore-prometheus
 ```
 
-The API can run with memory repositories or PostgreSQL repositories. Memory remains the default. `PAYCORE_REPOSITORY_BACKEND=postgres` wires merchant, payer, payment, hold, and idempotency repositories to PostgreSQL. Redis rate limiting and Redis idempotency response caching are still planned.
+The API can run with memory repositories or PostgreSQL repositories. Memory remains the default. `PAYCORE_REPOSITORY_BACKEND=postgres` wires merchant, payer, payment, hold, idempotency, outbox, and settlement data to PostgreSQL-backed adapters where applicable.
 
-The repository also includes initial plain SQL migrations for merchant, payer, payment, hold, and idempotency tables. They can be applied locally with `go run ./cmd/paycore-migrate`.
+The repository includes plain SQL migrations for merchant, payer, payment, hold, idempotency, outbox, and settlement tables. They can be applied locally with `go run ./cmd/paycore-migrate`.

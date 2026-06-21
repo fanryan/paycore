@@ -1,6 +1,6 @@
 # Payer
 
-This document explains the current PayCore payer implementation as it exists today. It is written for resume and interview preparation, so it focuses on how the code works, what decisions were made, how payer balances are modeled, and what is still planned.
+This document explains the current PayCore payer implementation as it exists today. It is written for resume and interview preparation, so it focuses on how the code works, what decisions were made, and how payer balances support payment authorization, capture, and expiry.
 
 ## 1. Current Payer Scope
 
@@ -29,13 +29,13 @@ The Go API currently supports the payer foundation:
 - Optimistic concurrency enforcement for payer updates in memory and PostgreSQL repositories.
 - Entity, service, handler, router, and in-memory repository tests.
 
-### Not Implemented Yet
+### Future Hardening
 
-These are planned but not currently implemented:
+These items are outside the current portfolio milestone:
 
 - `GET /payers/{payer_id}`.
 - Dedicated payer balance adjustment endpoint.
-- Authorization expiry hold release workflow.
+- Authentication and protected payer administration endpoints.
 
 ### Public Endpoints
 
@@ -51,7 +51,7 @@ GET  /payers
 
 None currently.
 
-Authentication and protected payer administration endpoints have not been implemented yet.
+Authentication and protected payer administration endpoints are outside the current local systems milestone.
 
 ## 2. Runtime Flow
 
@@ -109,7 +109,17 @@ The feature package owns payer rules and HTTP request/response mapping. The cent
 
 ### Current Service Input
 
-There is no HTTP request contract yet. The current service input is:
+Current HTTP request:
+
+```json
+{
+  "id": "payer-1",
+  "available_balance_minor": 10000,
+  "currency": "USD"
+}
+```
+
+Current service input:
 
 ```go
 payer.CreatePayerInput{
@@ -218,7 +228,7 @@ Payer.CanAuthorize(amount, currency)
 true or false
 ```
 
-This is not a complete payment authorization workflow yet. The future authorization flow will also create a payment, create a hold, mutate available and held balances, persist idempotency state, and write an outbox event.
+The full payment authorization flow uses this payer behavior to create a payment, create a hold, reserve available balance into held balance, persist idempotency state, and write an outbox event.
 
 ## 5. Payer HTTP Flow
 
@@ -229,7 +239,7 @@ POST /payers
 GET  /payers
 ```
 
-`GET /payers/{payer_id}` is planned but not implemented.
+The current public payer API supports creation and listing. Single-record lookup is available internally through the repository and service boundary.
 
 Handler flow:
 
@@ -345,14 +355,3 @@ Owns payer HTTP request parsing, response mapping, and HTTP error mapping.
 `internal/payer/adapters/postgres/repository.go`
 
 Owns durable PostgreSQL payer persistence and optimistic concurrency behavior.
-
-## Checklist
-
-- [x] Add payer HTTP handler.
-- [x] Register payer routes in `internal/http/router.go`.
-- [x] Add payer handler tests.
-- [x] Add PostgreSQL migration for payers.
-- [x] Add PostgreSQL payer repository.
-- [x] Wire API runtime to PostgreSQL payer repository.
-- [x] Implement optimistic concurrency for balance mutation.
-- [ ] Document final payer request and response contracts.

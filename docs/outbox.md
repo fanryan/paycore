@@ -1,6 +1,6 @@
 # Outbox
 
-This document explains the current PayCore transactional outbox foundation as it exists today. It is written for resume and interview preparation, so it focuses on how the code works, what decisions were made, and what is still planned.
+This document explains the current PayCore transactional outbox foundation as it exists today. It is written for resume and interview preparation, so it focuses on how the code works, what decisions were made, and how PayCore publishes lifecycle events after durable commits.
 
 ## 1. Current Feature Scope
 
@@ -13,6 +13,7 @@ This document explains the current PayCore transactional outbox foundation as it
 - Outbox migration in `migrations/000005_create_outbox_events.sql`.
 - Payment authorization creates a `payment.authorized` event.
 - Payment capture creates a `payment.captured` event.
+- Payment expiry creates a `payment.expired` event.
 - Settlement creates a `payment.settled` event for each settled payment.
 - Postgres mode writes outbox events inside the payment service transaction.
 - Memory and PostgreSQL repositories can claim pending/failed events for publishing.
@@ -25,14 +26,16 @@ This document explains the current PayCore transactional outbox foundation as it
 - Logging publisher for local worker runs.
 - Kafka publisher adapter in `internal/outbox/adapters/kafka/publisher.go`.
 - Worker publisher backend selection through `PAYCORE_OUTBOX_PUBLISHER=logging|kafka`.
+- Kafka publisher integration test for local broker publishing.
 - API Postgres smoke test verifies both payment lifecycle and outbox event rows.
 
-### Not Implemented Yet
+### Future Hardening
 
-- Retry backoff policy.
-- Kafka publisher integration test.
-- Dead-letter handling.
-- LedgerFlow consumer integration.
+These items are outside the current PayCore repository milestone:
+
+- Tunable retry backoff policy.
+- Dead-letter replay tooling.
+- Full LedgerFlow consumer deployment.
 
 ### Public Endpoints
 
@@ -388,20 +391,3 @@ Persists outbox events, claims publisher work with `FOR UPDATE SKIP LOCKED`, mar
 `migrations/000005_create_outbox_events.sql`
 
 Creates the durable outbox table and indexes.
-
-## Checklist
-
-- [x] Add outbox event entity.
-- [x] Add outbox repository interface.
-- [x] Add memory outbox adapter.
-- [x] Add PostgreSQL outbox adapter.
-- [x] Add outbox migration.
-- [x] Emit `payment.authorized`.
-- [x] Emit `payment.captured`.
-- [x] Add claim/retry repository methods.
-- [x] Add outbox publisher worker skeleton.
-- [x] Add runtime worker command.
-- [x] Publish events to Kafka.
-- [x] Add Kafka publisher integration test.
-- [x] Add Postgres + Kafka worker integration test.
-- [ ] Add LedgerFlow integration notes.

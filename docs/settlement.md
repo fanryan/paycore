@@ -1,6 +1,6 @@
 # Settlement
 
-This document explains the current PayCore settlement foundation as it exists today. It is written for resume and interview preparation, so it focuses on how the code works, what decisions were made, what is still planned, and how PayCore prevents double settlement.
+This document explains the current PayCore settlement foundation as it exists today. It is written for resume and interview preparation, so it focuses on how the code works, what decisions were made, and how PayCore prevents double settlement.
 
 ## 1. Current Feature Scope
 
@@ -54,15 +54,17 @@ This document explains the current PayCore settlement foundation as it exists to
 - Domain tests for batch lifecycle, stale locks, line item validation, and net amount calculation.
 - Service tests for batch creation, empty-batch completion, and stale batch recovery.
 - PostgreSQL adapter integration tests.
+- One-shot settlement worker in `cmd/paycore-settlement-worker`.
+- Prometheus settlement metrics.
 
-### Not Implemented Yet
+### Out Of Scope
+
+These items are outside the current local-first settlement milestone:
 
 - In-memory settlement repository adapter.
 - Looping settlement scheduler.
-- `POST /settlement-batches`.
-- `GET /settlement-batches/{batch_id}`.
+- Settlement HTTP administration endpoints.
 - Redis settlement coordination lock.
-- Settlement metrics.
 
 ### Public Endpoints
 
@@ -70,13 +72,11 @@ None currently.
 
 ### Protected Endpoints Or Protected By Default
 
-No settlement HTTP endpoints exist yet. When added, settlement endpoints should be protected by operator/admin auth.
+Settlement is operated through a worker command rather than HTTP endpoints in this project. If HTTP administration endpoints are added later, they should be protected by operator/admin auth.
 
 ## 2. Runtime Flow
 
 ### App Startup
-
-Settlement is not wired into `cmd/paycore-api/main.go` yet.
 
 Settlement can be run as a one-shot worker command:
 
@@ -104,7 +104,7 @@ migrations/
   +--> 000006_create_settlements.sql
 ```
 
-The settlement package owns settlement batch and line item domain rules. Future repository adapters should live under `internal/settlement/adapters/...`.
+The settlement package owns settlement batch and line item domain rules. The PostgreSQL adapter lives under `internal/settlement/adapters/postgres`.
 
 ## 3. Main Settlement Flow
 
@@ -314,7 +314,7 @@ Defines settlement batch and line item entities, status constants, lifecycle met
 
 `internal/settlement/repository.go`
 
-Defines the repository interface and repository-level errors for future adapters.
+Defines the repository interface and repository-level errors for adapter implementations.
 
 `internal/settlement/service.go`
 
@@ -331,20 +331,3 @@ Recovers stale settlement batches, runs one settlement batch for the previous co
 `migrations/000006_create_settlements.sql`
 
 Creates settlement batch and line item tables, adds `payments.settlement_batch_id`, and adds indexes/constraints for settlement processing.
-
-## Checklist
-
-- [x] Add settlement batch entity.
-- [x] Add settlement line item entity.
-- [x] Add settlement repository interface.
-- [x] Add settlement migration.
-- [x] Add domain tests.
-- [x] Add PostgreSQL settlement repository adapter.
-- [x] Add settlement service.
-- [x] Add captured-payment claim query.
-- [x] Add payment `SETTLED` transition wiring.
-- [x] Add `payment.settled` outbox event creation.
-- [x] Add settlement worker command.
-- [x] Add stale batch recovery tests.
-- [ ] Add settlement HTTP endpoints.
-- [ ] Add settlement metrics.
