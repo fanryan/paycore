@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/fanryan/paycore/internal/payment"
 	"github.com/fanryan/paycore/internal/shared/db"
@@ -114,6 +115,57 @@ func (s *Store) GetPayment(ctx context.Context, paymentID string) (payment.Payme
 	}
 
 	return paymentRecord, nil
+}
+
+func (s *Store) ListExpiredAuthorizedPayments(ctx context.Context, now time.Time, limit int) ([]payment.Payment, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+
+	const query = `
+		SELECT
+			id,
+			merchant_id,
+			payer_id,
+			amount_minor,
+			currency,
+			status,
+			authorization_hold_id,
+			authorized_at,
+			expires_at,
+			captured_at,
+			settled_at,
+			created_at,
+			updated_at
+		FROM payments
+		WHERE status = 'AUTHORIZED'
+		AND expires_at <= $1
+		ORDER BY expires_at ASC, id ASC
+		LIMIT $2
+		FOR UPDATE SKIP LOCKED
+	`
+
+	rows, err := s.executor(ctx).Query(ctx, query, now.UTC(), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	payments := make([]payment.Payment, 0)
+	for rows.Next() {
+		paymentRecord, err := scanPayment(rows)
+		if err != nil {
+			return nil, err
+		}
+
+		payments = append(payments, paymentRecord)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return payments, nil
 }
 
 func (s *Store) UpdatePayment(ctx context.Context, paymentRecord payment.Payment) (payment.Payment, error) {
@@ -315,11 +367,21 @@ func (s *Store) UpdateHold(ctx context.Context, hold payment.Hold) (payment.Hold
 }
 
 func (s *Store) queryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	return s.executor(ctx).QueryRow(ctx, sql, args...)
+}
+
+type executor interface {
+	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+func (s *Store) executor(ctx context.Context) executor {
 	if tx, ok := db.TxFromContext(ctx); ok {
-		return tx.QueryRow(ctx, sql, args...)
+		return tx
 	}
 
-	return s.pool.QueryRow(ctx, sql, args...)
+	return s.pool
 }
 
 type paymentScanner interface {

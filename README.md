@@ -40,7 +40,7 @@ Current development stage:
 - PostgreSQL merchant, payer, payment, hold, idempotency, outbox, and settlement schema migrations added
 - Runtime repository backend switch implemented with `PAYCORE_REPOSITORY_BACKEND=memory|postgres`
 - Shared transactor added for Postgres transaction propagation through `context.Context`
-- Transactional outbox foundation implemented for `payment.authorized` and `payment.captured` events
+- Transactional outbox foundation implemented for `payment.authorized`, `payment.captured`, and `payment.expired` events
 - Outbox claim/retry repository methods implemented with PostgreSQL `FOR UPDATE SKIP LOCKED`
 - Outbox worker can publish through the local logging publisher or Kafka publisher adapter
 - Merchant HTTP create and list endpoints implemented
@@ -51,6 +51,7 @@ Current development stage:
 - Redis-backed idempotency response cache implemented as an optional replay acceleration layer
 - Payment authorization HTTP endpoint implemented with local in-memory `Idempotency-Key` enforcement
 - Payment capture service and HTTP endpoint implemented with local in-memory `Idempotency-Key` enforcement
+- Payment authorization expiry service and one-shot expiry worker implemented for releasing expired holds
 - Redis-backed fixed-window rate limiting implemented for payment mutation routes
 - Settlement batch and line item domain foundation implemented
 - Settlement schema migration added with double-settlement guards
@@ -174,6 +175,13 @@ go run ./cmd/paycore-outbox-worker
 
 Run migrations before starting the worker. The worker requires the `outbox_events` table from `migrations/000005_create_outbox_events.sql`.
 
+Run one payment authorization expiry batch:
+
+```bash
+PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=disable' \
+go run ./cmd/paycore-expiry-worker
+```
+
 Run one settlement batch for the previous completed window:
 
 ```bash
@@ -219,6 +227,7 @@ Supported local configuration:
 | `PAYCORE_RATE_LIMIT_WINDOW_SECONDS` | `60` | Fixed-window length in seconds |
 | `PAYCORE_IDEMPOTENCY_CACHE_ENABLED` | `false` | Enables Redis-backed idempotency response cache |
 | `PAYCORE_IDEMPOTENCY_CACHE_TTL_SECONDS` | `86400` | Redis idempotency response cache TTL in seconds |
+| `PAYCORE_EXPIRY_LIMIT` | `100` | Maximum expired authorized payments processed per expiry worker run |
 | `PAYCORE_SETTLEMENT_WORKER_ID` | `paycore-settlement-worker` | Worker id recorded on processing settlement batches |
 | `PAYCORE_SETTLEMENT_WINDOW_MINUTES` | `60` | Previous completed window size processed by settlement worker |
 | `PAYCORE_SETTLEMENT_CLAIM_LIMIT` | `100` | Maximum captured payments claimed per settlement batch |
@@ -585,6 +594,7 @@ stateDiagram-v2
 Current documentation:
 
 - `docs/architecture.md`
+- `docs/architecture-tradeoffs.md`
 - `docs/idempotency.md`
 - `docs/load-testing.md`
 - `docs/local-infrastructure.md`
@@ -597,7 +607,6 @@ Current documentation:
 
 Planned documentation:
 
-- `docs/architecture-tradeoffs.md`
 - `docs/payment-lifecycle.md`
 - `docs/idempotency.md`
 - `docs/outbox.md`

@@ -138,6 +138,50 @@ func TestRepositoryRejectsDuplicatePaymentAndHold(t *testing.T) {
 	}
 }
 
+func TestRepositoryListsExpiredAuthorizedPayments(t *testing.T) {
+	ctx := context.Background()
+	pool := newTestPool(t)
+	store := paymentpostgres.NewStore(pool)
+	prefix := testPrefix()
+	t.Cleanup(func() {
+		cleanupPaymentFixture(t, pool, prefix)
+	})
+
+	seedPaymentParents(t, pool, prefix)
+
+	first := testPayment(t, prefix+"-payment-1", prefix+"-hold-1", prefix)
+	first.ExpiresAt = testNow().Add(-2 * time.Minute)
+	second := testPayment(t, prefix+"-payment-2", prefix+"-hold-2", prefix)
+	second.ExpiresAt = testNow().Add(-time.Minute)
+	notExpired := testPayment(t, prefix+"-payment-3", prefix+"-hold-3", prefix)
+	notExpired.ExpiresAt = testNow().Add(time.Minute)
+	captured := testPayment(t, prefix+"-payment-4", prefix+"-hold-4", prefix)
+	capturedPayment, err := captured.Capture(testNow().Add(-30 * time.Second))
+	if err != nil {
+		t.Fatalf("expected capture to succeed, got error: %v", err)
+	}
+	capturedPayment.ExpiresAt = testNow().Add(-time.Minute)
+
+	for _, paymentRecord := range []payment.Payment{second, notExpired, capturedPayment, first} {
+		if _, err := store.CreatePayment(ctx, paymentRecord); err != nil {
+			t.Fatalf("expected payment create to succeed, got error: %v", err)
+		}
+	}
+
+	expired, err := store.ListExpiredAuthorizedPayments(ctx, testNow(), 1)
+	if err != nil {
+		t.Fatalf("expected expired payment list to succeed, got error: %v", err)
+	}
+
+	if len(expired) != 1 {
+		t.Fatalf("expected 1 expired payment, got %d", len(expired))
+	}
+
+	if expired[0].ID != first.ID {
+		t.Fatalf("expected earliest expired payment %q, got %q", first.ID, expired[0].ID)
+	}
+}
+
 func TestRepositoryReturnsNotFoundForMissingPaymentAndHold(t *testing.T) {
 	ctx := context.Background()
 	pool := newTestPool(t)

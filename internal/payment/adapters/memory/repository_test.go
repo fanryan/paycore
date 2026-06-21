@@ -70,6 +70,42 @@ func TestStoreUpdatesPayment(t *testing.T) {
 	}
 }
 
+func TestStoreListsExpiredAuthorizedPayments(t *testing.T) {
+	ctx := context.Background()
+	store := NewStore()
+	first := testPayment(t, "payment-1", "hold-1")
+	first.ExpiresAt = testNow().Add(-2 * time.Minute)
+	second := testPayment(t, "payment-2", "hold-2")
+	second.ExpiresAt = testNow().Add(-time.Minute)
+	notExpired := testPayment(t, "payment-3", "hold-3")
+	notExpired.ExpiresAt = testNow().Add(time.Minute)
+	captured := testPayment(t, "payment-4", "hold-4")
+	capturedPayment, err := captured.Capture(testNow().Add(-30 * time.Second))
+	if err != nil {
+		t.Fatalf("expected capture to succeed, got error: %v", err)
+	}
+	capturedPayment.ExpiresAt = testNow().Add(-time.Minute)
+
+	for _, paymentRecord := range []payment.Payment{second, notExpired, capturedPayment, first} {
+		if _, err := store.CreatePayment(ctx, paymentRecord); err != nil {
+			t.Fatalf("expected payment create to succeed, got error: %v", err)
+		}
+	}
+
+	expired, err := store.ListExpiredAuthorizedPayments(ctx, testNow(), 1)
+	if err != nil {
+		t.Fatalf("expected expired payment list to succeed, got error: %v", err)
+	}
+
+	if len(expired) != 1 {
+		t.Fatalf("expected 1 expired payment, got %d", len(expired))
+	}
+
+	if expired[0].ID != first.ID {
+		t.Fatalf("expected earliest expired payment %q, got %q", first.ID, expired[0].ID)
+	}
+}
+
 func TestStoreReturnsPaymentNotFound(t *testing.T) {
 	store := NewStore()
 

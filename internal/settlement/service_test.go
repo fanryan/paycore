@@ -504,6 +504,10 @@ func (r *fakePaymentRepository) GetPayment(ctx context.Context, paymentID string
 	return paymentRecord, nil
 }
 
+func (r *fakePaymentRepository) ListExpiredAuthorizedPayments(ctx context.Context, now time.Time, limit int) ([]payment.Payment, error) {
+	return nil, errors.New("not implemented")
+}
+
 func (r *fakePaymentRepository) UpdatePayment(ctx context.Context, paymentRecord payment.Payment) (payment.Payment, error) {
 	if err := ctx.Err(); err != nil {
 		return payment.Payment{}, err

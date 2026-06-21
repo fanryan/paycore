@@ -2,7 +2,9 @@ package memory
 
 import (
 	"context"
+	"sort"
 	"sync"
+	"time"
 
 	"github.com/fanryan/paycore/internal/payment"
 )
@@ -53,6 +55,43 @@ func (s *Store) GetPayment(ctx context.Context, paymentID string) (payment.Payme
 	}
 
 	return paymentRecord, nil
+}
+
+func (s *Store) ListExpiredAuthorizedPayments(ctx context.Context, now time.Time, limit int) ([]payment.Payment, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	now = now.UTC()
+	results := make([]payment.Payment, 0)
+	for _, paymentRecord := range s.payments {
+		if paymentRecord.Status != payment.StatusAuthorized {
+			continue
+		}
+
+		if paymentRecord.ExpiresAt.After(now) {
+			continue
+		}
+
+		results = append(results, paymentRecord)
+	}
+
+	sort.Slice(results, func(i, j int) bool {
+		if results[i].ExpiresAt.Equal(results[j].ExpiresAt) {
+			return results[i].ID < results[j].ID
+		}
+
+		return results[i].ExpiresAt.Before(results[j].ExpiresAt)
+	})
+
+	if limit > 0 && len(results) > limit {
+		results = results[:limit]
+	}
+
+	return results, nil
 }
 
 func (s *Store) UpdatePayment(ctx context.Context, paymentRecord payment.Payment) (payment.Payment, error) {

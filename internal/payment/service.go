@@ -17,6 +17,7 @@ const (
 	aggregateTypePayment       = "payment"
 	eventTypePaymentAuthorized = "payment.authorized"
 	eventTypePaymentCaptured   = "payment.captured"
+	eventTypePaymentExpired    = "payment.expired"
 )
 
 var (
@@ -66,6 +67,16 @@ type CapturePaymentResult struct {
 	Payer   payer.Payer
 }
 
+type ExpireAuthorizedPaymentsInput struct {
+	Limit int
+}
+
+type ExpireAuthorizedPaymentsResult struct {
+	Payments []Payment
+	Holds    []Hold
+	Payers   []payer.Payer
+}
+
 type paymentAuthorizedPayload struct {
 	PaymentID    string    `json:"payment_id"`
 	MerchantID   string    `json:"merchant_id"`
@@ -85,6 +96,17 @@ type paymentCapturedPayload struct {
 	Currency       string    `json:"currency"`
 	HoldID         string    `json:"hold_id"`
 	CapturedAt     time.Time `json:"captured_at"`
+}
+
+type paymentExpiredPayload struct {
+	PaymentID   string    `json:"payment_id"`
+	MerchantID  string    `json:"merchant_id"`
+	PayerID     string    `json:"payer_id"`
+	AmountMinor int64     `json:"amount_minor"`
+	Currency    string    `json:"currency"`
+	HoldID      string    `json:"hold_id"`
+	ExpiredAt   time.Time `json:"expired_at"`
+	ExpiresAt   time.Time `json:"expires_at"`
 }
 
 func NewService(merchants merchant.MerchantRepository, payers payer.PayerRepository, payments Repository) *Service {
@@ -153,6 +175,12 @@ func NewServiceWithTransactorOutboxAndMetrics(
 		transactor: transactor,
 		metrics:    metrics,
 		now:        time.Now,
+	}
+}
+
+func (s *Service) SetNowForTest(now time.Time) {
+	s.now = func() time.Time {
+		return now
 	}
 }
 
@@ -381,6 +409,105 @@ func (s *Service) CapturePayment(ctx context.Context, input CapturePaymentInput)
 	}
 
 	s.observeCapture("success", time.Since(startedAt))
+	return result, nil
+}
+
+func (s *Service) ExpireAuthorizedPayments(ctx context.Context, input ExpireAuthorizedPaymentsInput) (ExpireAuthorizedPaymentsResult, error) {
+	limit := input.Limit
+	if limit <= 0 {
+		limit = 100
+	}
+
+	var result ExpireAuthorizedPaymentsResult
+
+	err := s.transactor.WithinTx(ctx, func(ctx context.Context) error {
+		now := s.now().UTC()
+		expiredPayments, err := s.payments.ListExpiredAuthorizedPayments(ctx, now, limit)
+		if err != nil {
+			return err
+		}
+
+		result.Payments = make([]Payment, 0, len(expiredPayments))
+		result.Holds = make([]Hold, 0, len(expiredPayments))
+		result.Payers = make([]payer.Payer, 0, len(expiredPayments))
+
+		for _, paymentRecord := range expiredPayments {
+			hold, err := s.payments.GetHoldByPaymentID(ctx, paymentRecord.ID)
+			if err != nil {
+				return err
+			}
+
+			payerRecord, err := s.payers.GetPayer(ctx, paymentRecord.PayerID)
+			if err != nil {
+				return err
+			}
+
+			updatedPayer, err := payerRecord.Release(paymentRecord.AmountMinor, paymentRecord.Currency, now)
+			if err != nil {
+				return err
+			}
+
+			updatedPayer, err = s.payers.UpdatePayer(ctx, updatedPayer)
+			if err != nil {
+				return err
+			}
+
+			releasedHold, err := hold.Release(now)
+			if err != nil {
+				return err
+			}
+
+			releasedHold, err = s.payments.UpdateHold(ctx, releasedHold)
+			if err != nil {
+				return err
+			}
+
+			expiredPayment, err := paymentRecord.Expire(now)
+			if err != nil {
+				return err
+			}
+
+			expiredPayment, err = s.payments.UpdatePayment(ctx, expiredPayment)
+			if err != nil {
+				return err
+			}
+
+			event, err := outbox.NewEvent(outbox.NewEventInput{
+				AggregateType: aggregateTypePayment,
+				AggregateID:   expiredPayment.ID,
+				EventType:     eventTypePaymentExpired,
+				Payload: paymentExpiredPayload{
+					PaymentID:   expiredPayment.ID,
+					MerchantID:  expiredPayment.MerchantID,
+					PayerID:     expiredPayment.PayerID,
+					AmountMinor: expiredPayment.AmountMinor,
+					Currency:    expiredPayment.Currency,
+					HoldID:      releasedHold.ID,
+					ExpiredAt:   now,
+					ExpiresAt:   expiredPayment.ExpiresAt,
+				},
+				Now: now,
+			})
+			if err != nil {
+				return err
+			}
+
+			if _, err := s.outbox.CreateEvent(ctx, event); err != nil {
+				return err
+			}
+
+			result.Payments = append(result.Payments, expiredPayment)
+			result.Holds = append(result.Holds, releasedHold)
+			result.Payers = append(result.Payers, updatedPayer)
+		}
+
+		return nil
+	})
+	if err != nil {
+		s.observePayerVersionConflict(err)
+		return ExpireAuthorizedPaymentsResult{}, err
+	}
+
 	return result, nil
 }
 

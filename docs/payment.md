@@ -13,6 +13,7 @@ The Go API currently supports the payment foundation:
 - Payment repository interface in `internal/payment/repository.go`.
 - Payment authorization service in `internal/payment/service.go`.
 - Payment capture service in `internal/payment/service.go`.
+- Payment authorization expiry service in `internal/payment/service.go`.
 - In-memory payment repository adapter in `internal/payment/adapters/memory/repository.go`.
 - PostgreSQL payment and hold repository adapter in `internal/payment/adapters/postgres/repository.go`.
 - Payment statuses:
@@ -57,6 +58,12 @@ The Go API currently supports the payment foundation:
   - captures the hold
   - deducts payer held balance
   - persists payer, hold, and payment through configured repositories
+- Internal expiry service that:
+  - finds expired `AUTHORIZED` payments
+  - releases the payer held balance back to available balance
+  - transitions the hold to `RELEASED`
+  - transitions the payment to `EXPIRED`
+  - writes a `payment.expired` outbox event
 - Payment authorization HTTP handler in `internal/payment/handler.go`.
 - Payment capture HTTP handler in `internal/payment/handler.go`.
 - Payment authorization response recording in `internal/payment/response_recorder.go` for local idempotency replay.
@@ -64,7 +71,7 @@ The Go API currently supports the payment foundation:
 - `POST /payments/{payment_id}/capture` route composed through `internal/http/router.go`.
 - Runtime repository backend switch through `PAYCORE_REPOSITORY_BACKEND=memory|postgres`.
 - Service-level transaction orchestration through `internal/shared/db.Transactor`.
-- Transactional outbox events for `payment.authorized`, `payment.captured`, and `payment.settled`.
+- Transactional outbox events for `payment.authorized`, `payment.captured`, `payment.expired`, and `payment.settled`.
 - Redis-backed rate limiting on payment mutation routes.
 - Redis-backed idempotency response cache for replay acceleration.
 - Postgres-backed HTTP smoke test in `cmd/paycore-api/main_test.go`.
@@ -76,7 +83,6 @@ These are planned but not currently implemented:
 
 - `GET /payments/{payment_id}`.
 - Single PostgreSQL transaction that also includes idempotency completion.
-- Authorization expiry worker.
 - Durable crash recovery.
 
 ### Public Endpoints
@@ -311,7 +317,7 @@ HELD -> CAPTURED
 HELD -> RELEASED
 ```
 
-Holds are created during authorization. Capture moves the hold from `HELD` to `CAPTURED` and deducts the captured amount from the payer held balance. Release exists at the entity and payer balance level for future authorization expiry or void flows.
+Holds are created during authorization. Capture moves the hold from `HELD` to `CAPTURED` and deducts the captured amount from the payer held balance. Expiry moves the hold from `HELD` to `RELEASED` and releases the held amount back to the payer available balance.
 
 ## 6. Capture Service Flow
 
@@ -428,7 +434,78 @@ idempotency in flight    -> HTTP 409
 rate limit exceeded      -> planned HTTP 429
 ```
 
-## 7. Persistence
+## 7. Expiry Service Flow
+
+### Current Command
+
+The expiry flow currently runs through a one-shot worker command:
+
+```bash
+PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=disable' \
+go run ./cmd/paycore-expiry-worker
+```
+
+The batch size is controlled by `PAYCORE_EXPIRY_LIMIT`.
+
+### Step-by-Step
+
+1. The expiry worker starts from `cmd/paycore-expiry-worker/main.go`.
+2. The worker loads config and creates a PostgreSQL pool.
+3. The worker wires merchant, payer, payment, and outbox PostgreSQL repositories.
+4. The worker calls `Service.ExpireAuthorizedPayments(...)`.
+5. The service starts a transaction through `internal/shared/db.Transactor`.
+6. The payment repository claims expired `AUTHORIZED` payments with `FOR UPDATE SKIP LOCKED`.
+7. For each expired payment, the service loads the hold and payer.
+8. The payer held balance is released back to available balance.
+9. The hold transitions from `HELD` to `RELEASED`.
+10. The payment transitions from `AUTHORIZED` to `EXPIRED`.
+11. The service persists payer, hold, and payment updates.
+12. The service writes a `payment.expired` outbox event.
+13. The transaction commits the state changes and outbox events together.
+
+### Diagram
+
+```text
+paycore-expiry-worker
+  |
+  v
+Payment Service
+  |
+  +--> PaymentRepository.ListExpiredAuthorizedPayments
+  |       |
+  |       +--> status = AUTHORIZED
+  |       +--> expires_at <= now
+  |       +--> FOR UPDATE SKIP LOCKED
+  |
+  +--> PaymentRepository.GetHoldByPaymentID
+  +--> PayerRepository.GetPayer
+  |
+  +--> Payer.Release
+  +--> Hold.Release
+  +--> Payment.Expire
+  |
+  +--> PayerRepository.UpdatePayer
+  +--> PaymentRepository.UpdateHold
+  +--> PaymentRepository.UpdatePayment
+  +--> OutboxRepository.CreateEvent(payment.expired)
+```
+
+### Failure Path
+
+Expiry can fail if:
+
+```text
+payment.ErrHoldNotFound
+payer.ErrPayerNotFound
+payer.ErrPayerVersionConflict
+invalid hold state
+invalid payment state
+database transaction error
+```
+
+In Postgres mode, a failure rolls back payer, hold, payment, and outbox mutations for the batch.
+
+## 8. Persistence
 
 ### Current In-Memory Adapter
 
@@ -448,11 +525,11 @@ The current idempotency adapter also stores records in memory. This supports loc
 
 ### Current Transaction Boundary
 
-The authorization and capture services write payer, payment, and hold records through separate repository calls.
+The authorization, capture, and expiry services write payer, payment, and hold records through separate repository calls.
 
 In memory mode, `db.NoopTransactor` runs the service callback without durable transactionality. That keeps unit tests and local memory mode simple.
 
-In Postgres mode, `db.PostgresTransactor` starts one transaction, injects it into `context.Context`, and the Postgres payer/payment repositories execute against that transaction when present. This means payer balance mutation, payment mutation, and hold mutation commit or roll back together for authorization and capture.
+In Postgres mode, `db.PostgresTransactor` starts one transaction, injects it into `context.Context`, and the Postgres payer/payment repositories execute against that transaction when present. This means payer balance mutation, payment mutation, and hold mutation commit or roll back together for authorization, capture, and expiry.
 
 HTTP idempotency start/completion currently happens in the handler outside the payment service transaction. Outbox event creation now happens inside the payment service transaction with payer, payment, and hold mutations. A later milestone should move durable idempotency completion into the same transaction boundary.
 
@@ -471,9 +548,9 @@ Current durable records:
 
 Idempotency records are durable in Postgres mode through `internal/idempotency/adapters/postgres/repository.go`, but are not yet completed atomically with payment business state.
 
-Outbox events are durable in Postgres mode through `internal/outbox/adapters/postgres/repository.go`. Authorization creates `payment.authorized`; capture creates `payment.captured`.
+Outbox events are durable in Postgres mode through `internal/outbox/adapters/postgres/repository.go`. Authorization creates `payment.authorized`; capture creates `payment.captured`; expiry creates `payment.expired`.
 
-## 8. Tests
+## 9. Tests
 
 Current tests cover:
 
@@ -490,6 +567,7 @@ Current tests cover:
 - context cancellation behavior
 - successful authorization service flow
 - successful capture service flow
+- successful expiry service flow
 - payment authorization handler success path
 - payment authorization handler error mapping
 - payment capture handler success path
@@ -511,11 +589,16 @@ Current tests cover:
 - missing hold on capture rejection
 - non-capturable payment rejection
 - expired authorization rejection
+- expired authorization release of held balance
+- expired authorization hold release
+- expired authorization outbox event creation
+- expired authorization lookup in memory and PostgreSQL repositories
 - Postgres transactor commit behavior
 - Postgres transactor rollback behavior
 - nested Postgres transactor reuse behavior
 - payment authorization outbox event creation
 - payment capture outbox event creation
+- payment expiry outbox event creation
 
 Run:
 
@@ -523,7 +606,7 @@ Run:
 go test ./...
 ```
 
-## 9. File Guide
+## 10. File Guide
 
 `internal/payment/entity.go`
 
@@ -541,7 +624,12 @@ Defines the payment repository interface and payment/hold repository errors.
 
 Defines payment authorization orchestration across merchant, payer, payment, and hold state.
 It also defines payment capture orchestration across payment, hold, and payer balance state.
-Both flows use `internal/shared/db.Transactor` so Postgres mode can commit or roll back payer, payment, and hold mutations together.
+It also defines payment expiry orchestration across payment, hold, payer balance, and outbox state.
+These flows use `internal/shared/db.Transactor` so Postgres mode can commit or roll back payer, payment, hold, and outbox mutations together.
+
+`cmd/paycore-expiry-worker/main.go`
+
+Runs one expiry batch against PostgreSQL repositories.
 
 `internal/payment/handler.go`
 
@@ -594,7 +682,11 @@ Persists outbox events and participates in context-propagated PostgreSQL transac
 - [x] Add Postgres-backed HTTP lifecycle smoke test.
 - [x] Add transaction boundary around authorization and capture business mutations.
 - [x] Add durable authorization/capture transaction for payer, payment, and hold writes.
+- [x] Add authorization expiry service.
+- [x] Add one-shot authorization expiry worker.
+- [x] Add durable expiry transaction for payer, payment, hold, and outbox writes.
 - [ ] Move durable idempotency completion into the payment transaction boundary.
 - [x] Add transactional outbox event for `payment.authorized`.
 - [x] Add transactional outbox event for `payment.captured`.
+- [x] Add transactional outbox event for `payment.expired`.
 - [x] Add transactional outbox event for `payment.settled`.

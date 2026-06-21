@@ -475,6 +475,138 @@ func TestServiceRejectsExpiredAuthorizationOnCapture(t *testing.T) {
 	}
 }
 
+func TestServiceExpiresAuthorizedPayments(t *testing.T) {
+	ctx := context.Background()
+	fixture := newFixture(t)
+	authorized := authorizePayment(t, fixture)
+	fixture.service.SetNowForTest(authorized.Payment.ExpiresAt.Add(time.Minute))
+
+	result, err := fixture.service.ExpireAuthorizedPayments(ctx, payment.ExpireAuthorizedPaymentsInput{
+		Limit: 10,
+	})
+	if err != nil {
+		t.Fatalf("expected expiry to succeed, got error: %v", err)
+	}
+
+	if len(result.Payments) != 1 {
+		t.Fatalf("expected 1 expired payment, got %d", len(result.Payments))
+	}
+
+	if result.Payments[0].ID != authorized.Payment.ID {
+		t.Fatalf("expected expired payment %q, got %q", authorized.Payment.ID, result.Payments[0].ID)
+	}
+
+	if result.Payments[0].Status != payment.StatusExpired {
+		t.Fatalf("expected payment status EXPIRED, got %q", result.Payments[0].Status)
+	}
+
+	if len(result.Holds) != 1 || result.Holds[0].Status != payment.HoldStatusReleased {
+		t.Fatalf("expected released hold, got %#v", result.Holds)
+	}
+
+	if len(result.Payers) != 1 {
+		t.Fatalf("expected 1 updated payer, got %d", len(result.Payers))
+	}
+
+	if result.Payers[0].AvailableBalanceMinor != 10_000 {
+		t.Fatalf("expected available balance restored to 10000, got %d", result.Payers[0].AvailableBalanceMinor)
+	}
+
+	if result.Payers[0].HeldBalanceMinor != 0 {
+		t.Fatalf("expected held balance 0, got %d", result.Payers[0].HeldBalanceMinor)
+	}
+
+	storedPayment, err := fixture.payments.GetPayment(ctx, authorized.Payment.ID)
+	if err != nil {
+		t.Fatalf("expected stored payment, got error: %v", err)
+	}
+
+	if storedPayment.Status != payment.StatusExpired {
+		t.Fatalf("expected stored payment status EXPIRED, got %q", storedPayment.Status)
+	}
+
+	storedHold, err := fixture.payments.GetHoldByPaymentID(ctx, authorized.Payment.ID)
+	if err != nil {
+		t.Fatalf("expected stored hold, got error: %v", err)
+	}
+
+	if storedHold.Status != payment.HoldStatusReleased {
+		t.Fatalf("expected stored hold status RELEASED, got %q", storedHold.Status)
+	}
+
+	event := assertOutboxEvent(t, fixture, "payment.expired", authorized.Payment.ID)
+
+	var payload map[string]any
+	decodePayload(t, event, &payload)
+
+	if payload["payment_id"] != authorized.Payment.ID {
+		t.Fatalf("expected outbox payment_id %q, got %v", authorized.Payment.ID, payload["payment_id"])
+	}
+
+	if payload["hold_id"] != authorized.Hold.ID {
+		t.Fatalf("expected outbox hold_id %q, got %v", authorized.Hold.ID, payload["hold_id"])
+	}
+}
+
+func TestServiceExpireAuthorizedPaymentsIgnoresNonExpiredPayments(t *testing.T) {
+	fixture := newFixture(t)
+	authorizePayment(t, fixture)
+	fixture.service.SetNowForTest(testNow().Add(5 * time.Minute))
+
+	result, err := fixture.service.ExpireAuthorizedPayments(context.Background(), payment.ExpireAuthorizedPaymentsInput{
+		Limit: 10,
+	})
+	if err != nil {
+		t.Fatalf("expected expiry to succeed, got error: %v", err)
+	}
+
+	if len(result.Payments) != 0 {
+		t.Fatalf("expected 0 expired payments, got %d", len(result.Payments))
+	}
+}
+
+func TestServiceExpireAuthorizedPaymentsRespectsLimit(t *testing.T) {
+	ctx := context.Background()
+	fixture := newFixture(t)
+	first := authorizePayment(t, fixture)
+
+	secondPayer, err := payer.NewPayer("payer-2", 10_000, "USD", testNow())
+	if err != nil {
+		t.Fatalf("expected payer create to succeed, got error: %v", err)
+	}
+
+	if _, err := fixture.payers.CreatePayer(ctx, secondPayer); err != nil {
+		t.Fatalf("expected payer save to succeed, got error: %v", err)
+	}
+
+	second, err := fixture.service.AuthorizePayment(ctx, payment.AuthorizePaymentInput{
+		MerchantID:  "merchant-1",
+		PayerID:     "payer-2",
+		AmountMinor: 4_000,
+		Currency:    "USD",
+	})
+	if err != nil {
+		t.Fatalf("expected second authorization to succeed, got error: %v", err)
+	}
+
+	fixture.service.SetNowForTest(first.Payment.ExpiresAt.Add(time.Minute))
+
+	result, err := fixture.service.ExpireAuthorizedPayments(ctx, payment.ExpireAuthorizedPaymentsInput{
+		Limit: 1,
+	})
+	if err != nil {
+		t.Fatalf("expected expiry to succeed, got error: %v", err)
+	}
+
+	if len(result.Payments) != 1 {
+		t.Fatalf("expected 1 expired payment, got %d", len(result.Payments))
+	}
+
+	if result.Payments[0].ID != first.Payment.ID && result.Payments[0].ID != second.Payment.ID {
+		t.Fatalf("expired unexpected payment id %q", result.Payments[0].ID)
+	}
+}
+
 type fixture struct {
 	merchants *merchantmemory.Store
 	payers    *payermemory.Store
