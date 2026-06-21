@@ -11,21 +11,25 @@ import (
 )
 
 type Metrics struct {
-	registry                        *prometheus.Registry
-	httpRequestsTotal               *prometheus.CounterVec
-	httpRequestDuration             *prometheus.HistogramVec
-	settlementBatchTotal            *prometheus.CounterVec
-	settlementBatchDuration         *prometheus.HistogramVec
-	settlementPaymentsTotal         prometheus.Counter
-	settlementRecoveredBatchesTotal prometheus.Counter
-	outboxClaimedEventsTotal        *prometheus.CounterVec
-	outboxPublishAttemptsTotal      *prometheus.CounterVec
-	outboxPublishFailuresTotal      *prometheus.CounterVec
-	outboxEventsPublishedTotal      *prometheus.CounterVec
-	rateLimitAllowedTotal           prometheus.Counter
-	rateLimitRejectedTotal          prometheus.Counter
-	rateLimitRedisErrorsTotal       prometheus.Counter
-	rateLimitCheckDuration          *prometheus.HistogramVec
+	registry                         *prometheus.Registry
+	httpRequestsTotal                *prometheus.CounterVec
+	httpRequestDuration              *prometheus.HistogramVec
+	settlementBatchTotal             *prometheus.CounterVec
+	settlementBatchDuration          *prometheus.HistogramVec
+	settlementPaymentsTotal          prometheus.Counter
+	settlementRecoveredBatchesTotal  prometheus.Counter
+	outboxClaimedEventsTotal         *prometheus.CounterVec
+	outboxPublishAttemptsTotal       *prometheus.CounterVec
+	outboxPublishFailuresTotal       *prometheus.CounterVec
+	outboxEventsPublishedTotal       *prometheus.CounterVec
+	rateLimitAllowedTotal            prometheus.Counter
+	rateLimitRejectedTotal           prometheus.Counter
+	rateLimitRedisErrorsTotal        prometheus.Counter
+	rateLimitCheckDuration           *prometheus.HistogramVec
+	idempotencyCacheHitsTotal        prometheus.Counter
+	idempotencyCacheMissesTotal      prometheus.Counter
+	idempotencyCacheErrorsTotal      prometheus.Counter
+	idempotencyPostgresFallbackTotal prometheus.Counter
 }
 
 func New() *Metrics {
@@ -126,6 +130,30 @@ func New() *Metrics {
 		},
 		[]string{"result"},
 	)
+	idempotencyCacheHitsTotal := prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "paycore_idempotency_cache_hits_total",
+			Help: "Total idempotency response cache hits.",
+		},
+	)
+	idempotencyCacheMissesTotal := prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "paycore_idempotency_cache_misses_total",
+			Help: "Total idempotency response cache misses.",
+		},
+	)
+	idempotencyCacheErrorsTotal := prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "paycore_idempotency_cache_errors_total",
+			Help: "Total idempotency response cache errors.",
+		},
+	)
+	idempotencyPostgresFallbackTotal := prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "paycore_idempotency_postgres_fallback_total",
+			Help: "Total idempotency requests served from durable records after cache miss or error.",
+		},
+	)
 
 	registry.MustRegister(
 		collectors.NewGoCollector(),
@@ -144,24 +172,32 @@ func New() *Metrics {
 		rateLimitRejectedTotal,
 		rateLimitRedisErrorsTotal,
 		rateLimitCheckDuration,
+		idempotencyCacheHitsTotal,
+		idempotencyCacheMissesTotal,
+		idempotencyCacheErrorsTotal,
+		idempotencyPostgresFallbackTotal,
 	)
 
 	return &Metrics{
-		registry:                        registry,
-		httpRequestsTotal:               httpRequestsTotal,
-		httpRequestDuration:             httpRequestDuration,
-		settlementBatchTotal:            settlementBatchTotal,
-		settlementBatchDuration:         settlementBatchDuration,
-		settlementPaymentsTotal:         settlementPaymentsTotal,
-		settlementRecoveredBatchesTotal: settlementRecoveredBatchesTotal,
-		outboxClaimedEventsTotal:        outboxClaimedEventsTotal,
-		outboxPublishAttemptsTotal:      outboxPublishAttemptsTotal,
-		outboxPublishFailuresTotal:      outboxPublishFailuresTotal,
-		outboxEventsPublishedTotal:      outboxEventsPublishedTotal,
-		rateLimitAllowedTotal:           rateLimitAllowedTotal,
-		rateLimitRejectedTotal:          rateLimitRejectedTotal,
-		rateLimitRedisErrorsTotal:       rateLimitRedisErrorsTotal,
-		rateLimitCheckDuration:          rateLimitCheckDuration,
+		registry:                         registry,
+		httpRequestsTotal:                httpRequestsTotal,
+		httpRequestDuration:              httpRequestDuration,
+		settlementBatchTotal:             settlementBatchTotal,
+		settlementBatchDuration:          settlementBatchDuration,
+		settlementPaymentsTotal:          settlementPaymentsTotal,
+		settlementRecoveredBatchesTotal:  settlementRecoveredBatchesTotal,
+		outboxClaimedEventsTotal:         outboxClaimedEventsTotal,
+		outboxPublishAttemptsTotal:       outboxPublishAttemptsTotal,
+		outboxPublishFailuresTotal:       outboxPublishFailuresTotal,
+		outboxEventsPublishedTotal:       outboxEventsPublishedTotal,
+		rateLimitAllowedTotal:            rateLimitAllowedTotal,
+		rateLimitRejectedTotal:           rateLimitRejectedTotal,
+		rateLimitRedisErrorsTotal:        rateLimitRedisErrorsTotal,
+		rateLimitCheckDuration:           rateLimitCheckDuration,
+		idempotencyCacheHitsTotal:        idempotencyCacheHitsTotal,
+		idempotencyCacheMissesTotal:      idempotencyCacheMissesTotal,
+		idempotencyCacheErrorsTotal:      idempotencyCacheErrorsTotal,
+		idempotencyPostgresFallbackTotal: idempotencyPostgresFallbackTotal,
 	}
 }
 
@@ -223,4 +259,20 @@ func (m *Metrics) ObserveRateLimit(result string, duration time.Duration) {
 	}
 
 	m.rateLimitCheckDuration.WithLabelValues(result).Observe(duration.Seconds())
+}
+
+func (m *Metrics) ObserveIdempotencyCacheHit() {
+	m.idempotencyCacheHitsTotal.Inc()
+}
+
+func (m *Metrics) ObserveIdempotencyCacheMiss() {
+	m.idempotencyCacheMissesTotal.Inc()
+}
+
+func (m *Metrics) ObserveIdempotencyCacheError() {
+	m.idempotencyCacheErrorsTotal.Inc()
+}
+
+func (m *Metrics) ObserveIdempotencyPostgresFallback() {
+	m.idempotencyPostgresFallbackTotal.Inc()
 }

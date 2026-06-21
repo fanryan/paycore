@@ -123,6 +123,38 @@ func TestServiceReplaysCompletedRequestFromCache(t *testing.T) {
 	}
 }
 
+func TestServiceRecordsCacheHitMetric(t *testing.T) {
+	store := memory.NewStore()
+	cache := &fakeCache{}
+	metrics := &fakeMetricsRecorder{}
+	service := idempotency.NewServiceWithCacheAndMetrics(store, cache, metrics, time.Hour)
+	ctx := context.Background()
+
+	completeRequest(t, service, ctx)
+
+	cache.getResponse = idempotency.CachedResponse{
+		Key:          "key-1",
+		RequestHash:  "hash-1",
+		ResponseCode: 202,
+		ResponseBody: []byte(`{"cached":true}`),
+	}
+
+	if _, err := service.StartRequest(ctx, idempotency.StartRequestInput{
+		Key:         "key-1",
+		RequestHash: "hash-1",
+	}); err != nil {
+		t.Fatalf("expected replay start to succeed, got error: %v", err)
+	}
+
+	if metrics.cacheHits != 1 {
+		t.Fatalf("expected 1 cache hit, got %d", metrics.cacheHits)
+	}
+
+	if metrics.postgresFallbacks != 0 {
+		t.Fatalf("expected no postgres fallback, got %d", metrics.postgresFallbacks)
+	}
+}
+
 func TestServiceFallsBackToRepositoryWhenCacheMisses(t *testing.T) {
 	store := memory.NewStore()
 	cache := &fakeCache{
@@ -160,6 +192,68 @@ func TestServiceFallsBackToRepositoryWhenCacheMisses(t *testing.T) {
 
 	if string(result.ResponseBody) != `{"payment_id":"pay_1"}` {
 		t.Fatalf("expected durable response body, got %s", result.ResponseBody)
+	}
+}
+
+func TestServiceRecordsCacheMissAndFallbackMetrics(t *testing.T) {
+	store := memory.NewStore()
+	cache := &fakeCache{
+		getErr: idempotency.ErrCachedResponseNotFound,
+	}
+	metrics := &fakeMetricsRecorder{}
+	service := idempotency.NewServiceWithCacheAndMetrics(store, cache, metrics, time.Hour)
+	ctx := context.Background()
+
+	completeRequest(t, service, ctx)
+
+	if _, err := service.StartRequest(ctx, idempotency.StartRequestInput{
+		Key:         "key-1",
+		RequestHash: "hash-1",
+	}); err != nil {
+		t.Fatalf("expected replay start to succeed, got error: %v", err)
+	}
+
+	if metrics.cacheMisses != 1 {
+		t.Fatalf("expected 1 cache miss, got %d", metrics.cacheMisses)
+	}
+
+	if metrics.cacheErrors != 0 {
+		t.Fatalf("expected no cache errors, got %d", metrics.cacheErrors)
+	}
+
+	if metrics.postgresFallbacks != 1 {
+		t.Fatalf("expected 1 postgres fallback, got %d", metrics.postgresFallbacks)
+	}
+}
+
+func TestServiceRecordsCacheErrorAndFallbackMetrics(t *testing.T) {
+	store := memory.NewStore()
+	cache := &fakeCache{
+		getErr: errors.New("redis unavailable"),
+	}
+	metrics := &fakeMetricsRecorder{}
+	service := idempotency.NewServiceWithCacheAndMetrics(store, cache, metrics, time.Hour)
+	ctx := context.Background()
+
+	completeRequest(t, service, ctx)
+
+	if _, err := service.StartRequest(ctx, idempotency.StartRequestInput{
+		Key:         "key-1",
+		RequestHash: "hash-1",
+	}); err != nil {
+		t.Fatalf("expected replay start to succeed, got error: %v", err)
+	}
+
+	if metrics.cacheErrors != 1 {
+		t.Fatalf("expected 1 cache error, got %d", metrics.cacheErrors)
+	}
+
+	if metrics.cacheMisses != 0 {
+		t.Fatalf("expected no cache misses, got %d", metrics.cacheMisses)
+	}
+
+	if metrics.postgresFallbacks != 1 {
+		t.Fatalf("expected 1 postgres fallback, got %d", metrics.postgresFallbacks)
 	}
 }
 
@@ -342,6 +436,25 @@ func newService() *idempotency.Service {
 	return idempotency.NewService(memory.NewStore(), time.Hour)
 }
 
+func completeRequest(t *testing.T, service *idempotency.Service, ctx context.Context) {
+	t.Helper()
+
+	if _, err := service.StartRequest(ctx, idempotency.StartRequestInput{
+		Key:         "key-1",
+		RequestHash: "hash-1",
+	}); err != nil {
+		t.Fatalf("expected start to succeed, got error: %v", err)
+	}
+
+	if _, err := service.CompleteRequest(ctx, idempotency.CompleteRequestInput{
+		Key:          "key-1",
+		ResponseCode: 201,
+		ResponseBody: []byte(`{"payment_id":"pay_1"}`),
+	}); err != nil {
+		t.Fatalf("expected complete to succeed, got error: %v", err)
+	}
+}
+
 type fakeCache struct {
 	getResponse idempotency.CachedResponse
 	getErr      error
@@ -371,4 +484,27 @@ func (c *fakeCache) SetResponse(ctx context.Context, response idempotency.Cached
 	c.setTTL = ttl
 
 	return c.setErr
+}
+
+type fakeMetricsRecorder struct {
+	cacheHits         int
+	cacheMisses       int
+	cacheErrors       int
+	postgresFallbacks int
+}
+
+func (r *fakeMetricsRecorder) ObserveIdempotencyCacheHit() {
+	r.cacheHits++
+}
+
+func (r *fakeMetricsRecorder) ObserveIdempotencyCacheMiss() {
+	r.cacheMisses++
+}
+
+func (r *fakeMetricsRecorder) ObserveIdempotencyCacheError() {
+	r.cacheErrors++
+}
+
+func (r *fakeMetricsRecorder) ObserveIdempotencyPostgresFallback() {
+	r.postgresFallbacks++
 }

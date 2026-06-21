@@ -60,6 +60,7 @@ Current development stage:
 - Settlement stale batch recovery implemented by resuming expired `PROCESSING` batches before new work
 - Prometheus metrics foundation implemented for API HTTP requests, settlement batches, settlement recovery, and outbox publishing
 - Rate-limit metrics implemented for allowed, rejected, Redis error, and check duration paths
+- Idempotency cache metrics implemented for hits, misses, errors, and durable fallback paths
 - API exposes `GET /metrics`; outbox and settlement workers expose `/metrics` on `PAYCORE_METRICS_ADDR`
 - Shared currency normalization and validation implemented
 - Shared random id helper implemented

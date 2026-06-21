@@ -74,6 +74,29 @@ func TestMetricsExposeRateLimitCollectors(t *testing.T) {
 	}
 }
 
+func TestMetricsExposeIdempotencyCollectors(t *testing.T) {
+	appMetrics := metrics.New()
+
+	appMetrics.ObserveIdempotencyCacheHit()
+	appMetrics.ObserveIdempotencyCacheMiss()
+	appMetrics.ObserveIdempotencyCacheError()
+	appMetrics.ObserveIdempotencyPostgresFallback()
+
+	body := gatherMetrics(t, appMetrics)
+	expectedMetrics := []string{
+		"paycore_idempotency_cache_hits_total 1",
+		"paycore_idempotency_cache_misses_total 1",
+		"paycore_idempotency_cache_errors_total 1",
+		"paycore_idempotency_postgres_fallback_total 1",
+	}
+
+	for _, expected := range expectedMetrics {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("expected metric output to contain %q, got:\n%s", expected, body)
+		}
+	}
+}
+
 func gatherMetrics(t *testing.T, appMetrics *metrics.Metrics) string {
 	t.Helper()
 

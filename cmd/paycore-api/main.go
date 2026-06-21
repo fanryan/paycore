@@ -76,6 +76,7 @@ func main() {
 	}
 	defer closeIdempotencyCache()
 
+	appMetrics := metrics.New()
 	merchantService := merchant.NewMerchantService(repositories.merchants)
 	merchantHandler := merchant.NewHandler(merchantService)
 
@@ -89,9 +90,8 @@ func main() {
 		repositories.transactor,
 		repositories.outbox,
 	)
-	idempotencyService := idempotency.NewServiceWithCache(repositories.idempotency, idempotencyCache, 24*time.Hour)
+	idempotencyService := idempotency.NewServiceWithCacheAndMetrics(repositories.idempotency, idempotencyCache, appMetrics, 24*time.Hour)
 	paymentHandler := payment.NewHandlerWithIdempotency(paymentService, idempotencyService)
-	appMetrics := metrics.New()
 
 	server := &http.Server{
 		Addr: cfg.HTTPAddr,

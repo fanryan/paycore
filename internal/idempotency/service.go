@@ -13,6 +13,7 @@ var (
 type Service struct {
 	repository Repository
 	cache      Cache
+	metrics    MetricsRecorder
 	now        func() time.Time
 	ttl        time.Duration
 }
@@ -35,11 +36,22 @@ type CompleteRequestInput struct {
 	ResponseBody []byte
 }
 
+type MetricsRecorder interface {
+	ObserveIdempotencyCacheHit()
+	ObserveIdempotencyCacheMiss()
+	ObserveIdempotencyCacheError()
+	ObserveIdempotencyPostgresFallback()
+}
+
 func NewService(repository Repository, ttl time.Duration) *Service {
 	return NewServiceWithCache(repository, NoopCache{}, ttl)
 }
 
 func NewServiceWithCache(repository Repository, cache Cache, ttl time.Duration) *Service {
+	return NewServiceWithCacheAndMetrics(repository, cache, nil, ttl)
+}
+
+func NewServiceWithCacheAndMetrics(repository Repository, cache Cache, metrics MetricsRecorder, ttl time.Duration) *Service {
 	if ttl <= 0 {
 		ttl = 24 * time.Hour
 	}
@@ -51,6 +63,7 @@ func NewServiceWithCache(repository Repository, cache Cache, ttl time.Duration) 
 	return &Service{
 		repository: repository,
 		cache:      cache,
+		metrics:    metrics,
 		now:        time.Now,
 		ttl:        ttl,
 	}
@@ -104,6 +117,7 @@ func (s *Service) StartRequest(ctx context.Context, input StartRequestInput) (St
 
 	cached, err := s.cache.GetResponse(ctx, existing.Key, existing.RequestHash)
 	if err == nil {
+		s.observeIdempotencyCacheHit()
 		return StartRequestResult{
 			Record:       existing,
 			Replay:       true,
@@ -111,6 +125,13 @@ func (s *Service) StartRequest(ctx context.Context, input StartRequestInput) (St
 			ResponseBody: append([]byte(nil), cached.ResponseBody...),
 		}, nil
 	}
+
+	if errors.Is(err, ErrCachedResponseNotFound) {
+		s.observeIdempotencyCacheMiss()
+	} else {
+		s.observeIdempotencyCacheError()
+	}
+	s.observeIdempotencyPostgresFallback()
 
 	return StartRequestResult{
 		Record:       existing,
@@ -151,4 +172,36 @@ func (s *Service) CompleteRequest(ctx context.Context, input CompleteRequestInpu
 	}, cacheTTL)
 
 	return updated, nil
+}
+
+func (s *Service) observeIdempotencyCacheHit() {
+	if s.metrics == nil {
+		return
+	}
+
+	s.metrics.ObserveIdempotencyCacheHit()
+}
+
+func (s *Service) observeIdempotencyCacheMiss() {
+	if s.metrics == nil {
+		return
+	}
+
+	s.metrics.ObserveIdempotencyCacheMiss()
+}
+
+func (s *Service) observeIdempotencyCacheError() {
+	if s.metrics == nil {
+		return
+	}
+
+	s.metrics.ObserveIdempotencyCacheError()
+}
+
+func (s *Service) observeIdempotencyPostgresFallback() {
+	if s.metrics == nil {
+		return
+	}
+
+	s.metrics.ObserveIdempotencyPostgresFallback()
 }

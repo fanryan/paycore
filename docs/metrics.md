@@ -32,6 +32,11 @@ This document explains the current PayCore Prometheus metrics implementation as 
   - `paycore_rate_limit_rejected_total`
   - `paycore_rate_limit_redis_errors_total`
   - `paycore_rate_limit_check_duration_seconds{result}`
+- Idempotency cache metrics:
+  - `paycore_idempotency_cache_hits_total`
+  - `paycore_idempotency_cache_misses_total`
+  - `paycore_idempotency_cache_errors_total`
+  - `paycore_idempotency_postgres_fallback_total`
 - Go runtime and process collectors:
   - Go runtime metrics
   - process metrics
@@ -46,7 +51,6 @@ This document explains the current PayCore Prometheus metrics implementation as 
 ### Not Implemented Yet
 
 - Grafana dashboards.
-- Redis idempotency cache metrics.
 - Outbox pending-event gauge.
 - Outbox publish lag gauge.
 - Payment authorization/capture metrics.
@@ -312,6 +316,6 @@ Defines local scrape targets for host-run PayCore processes.
 - [x] Add Prometheus to Docker Compose.
 - [x] Add scrape configuration.
 - [x] Add Redis rate-limit metrics.
-- [ ] Add Redis idempotency cache metrics.
+- [x] Add Redis idempotency cache metrics.
 - [ ] Add outbox lag metrics.
 - [ ] Add dashboards or dashboard screenshots.
