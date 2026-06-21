@@ -2,14 +2,6 @@
 
 PayCore is a production-inspired payment gateway and settlement engine built as a Go backend systems project.
 
-The long-term goal is to model high-throughput payment infrastructure with idempotent payment authorization and capture, Redis-backed admission control, PostgreSQL-backed durable state, Kafka lifecycle event publishing, settlement batch processing, and Prometheus observability.
-
-## Project Snapshot
-
-PayCore is now at a portfolio-ready milestone. It demonstrates payment lifecycle state management, durable idempotency, Redis-backed admission control, PostgreSQL-backed balances and holds, service-level transactions, transactional outbox publishing, settlement recovery, Prometheus observability, and k6 load testing.
-
-Known next hardening areas are documented rather than hidden: transactional idempotency completion, authentication, dashboards/alerts, longer soak tests, and production deployment concerns.
-
 ## Goals
 
 PayCore is designed to demonstrate:
@@ -23,7 +15,7 @@ PayCore is designed to demonstrate:
 - Settlement batch processing and crash recovery
 - Transactional outbox publishing
 - Event-driven integration with LedgerFlow
-- High-throughput API design and observability
+- Baseline API performance testing and observability
 
 ## Capabilities
 
@@ -431,58 +423,3 @@ stateDiagram-v2
     AUTHORIZED --> EXPIRED
     CAPTURED --> SETTLED
 ```
-
-## Implementation Sequence
-
-1. API foundation and configuration
-2. Merchant and payer domain models
-3. Merchant and payer APIs
-4. Payment authorization and holds
-5. Payment capture and state machine enforcement
-6. Durable idempotency records
-7. Redis-backed rate limiting
-8. Redis-backed idempotency response caching
-9. PostgreSQL persistence
-10. Transactional outbox
-11. Kafka publishing
-12. Settlement batch processing
-13. Prometheus metrics
-14. Docker Compose local infrastructure
-15. Load testing and performance documentation
-
-## Documentation
-
-Current documentation:
-
-- `docs/architecture.md`
-- `docs/architecture-tradeoffs.md`
-- `docs/failure-modes.md`
-- `docs/idempotency.md`
-- `docs/load-testing.md`
-- `docs/local-infrastructure.md`
-- `docs/merchant.md`
-- `docs/metrics.md`
-- `docs/outbox.md`
-- `docs/payer.md`
-- `docs/payment.md`
-- `docs/performance-results.md`
-- `docs/postgresql-migrations.md`
-- `docs/rate-limiting.md`
-- `docs/settlement.md`
-
-Planned documentation:
-
-- `docs/payment-lifecycle.md`
-
-## Known Limitations And Next Hardening
-
-PayCore intentionally stops short of real payment rails, card networks, bank integrations, and production authentication.
-
-Important next hardening areas:
-
-- Move durable idempotency completion into the same PostgreSQL transaction as payment mutation and outbox writes.
-- Add authentication and authorization around operational endpoints.
-- Add Grafana dashboards and alert rules for outbox lag, Redis errors, payer conflict spikes, and API latency.
-- Add longer soak tests and repeatable benchmark reset tooling.
-- Add deployment manifests if moving beyond local Docker Compose.
-- Add explicit payment read APIs such as `GET /payments/{payment_id}`.
