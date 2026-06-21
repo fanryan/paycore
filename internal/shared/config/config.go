@@ -9,6 +9,7 @@ import (
 type Config struct {
 	Env                     string
 	HTTPAddr                string
+	MetricsAddr             string
 	HTTPReadHeaderTimeout   time.Duration
 	HTTPShutdownTimeout     time.Duration
 	DatabaseURL             string
@@ -28,6 +29,7 @@ func Load() Config {
 	return Config{
 		Env:                     getenv("PAYCORE_ENV", "local"),
 		HTTPAddr:                getenv("PAYCORE_HTTP_ADDR", ":8080"),
+		MetricsAddr:             getenv("PAYCORE_METRICS_ADDR", ":9091"),
 		HTTPReadHeaderTimeout:   durationSeconds("PAYCORE_HTTP_READ_HEADER_TIMEOUT_SECONDS", 5*time.Second),
 		HTTPShutdownTimeout:     durationSeconds("PAYCORE_HTTP_SHUTDOWN_TIMEOUT_SECONDS", 10*time.Second),
 		DatabaseURL:             getenv("PAYCORE_DATABASE_URL", ""),

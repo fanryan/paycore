@@ -7,6 +7,7 @@ import (
 
 	"github.com/fanryan/paycore/internal/ratelimit"
 	"github.com/fanryan/paycore/internal/shared/httpjson"
+	"github.com/fanryan/paycore/internal/shared/metrics"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -18,6 +19,8 @@ type RouterConfig struct {
 	MerchantHandler http.Handler
 	PayerHandler    http.Handler
 	PaymentHandler  http.Handler
+	MetricsHandler  http.Handler
+	Metrics         *metrics.Metrics
 	RateLimiter     ratelimit.Limiter
 }
 
@@ -34,10 +37,17 @@ func NewRouter(config RouterConfig) http.Handler {
 	}
 
 	router := chi.NewRouter()
+	if config.Metrics != nil {
+		router.Use(metricsMiddleware(config.Metrics))
+	}
 
 	router.Get("/healthz", healthHandler)
 	router.Get("/readyz", readyHandler)
 	router.Get("/version", versionHandler(config))
+
+	if config.MetricsHandler != nil {
+		router.Handle("/metrics", config.MetricsHandler)
+	}
 
 	if config.MerchantHandler != nil {
 		router.Handle("/merchants", config.MerchantHandler)

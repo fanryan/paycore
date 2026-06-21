@@ -19,6 +19,7 @@ import (
 	"github.com/fanryan/paycore/internal/payment"
 	paymentmemory "github.com/fanryan/paycore/internal/payment/adapters/memory"
 	"github.com/fanryan/paycore/internal/ratelimit"
+	"github.com/fanryan/paycore/internal/shared/metrics"
 )
 
 func TestHealthEndpoint(t *testing.T) {
@@ -96,6 +97,65 @@ func TestVersionEndpoint(t *testing.T) {
 
 	if body["started_at"] != "2026-06-06T12:00:00Z" {
 		t.Fatalf("expected started_at 2026-06-06T12:00:00Z, got %q", body["started_at"])
+	}
+}
+
+func TestMetricsEndpointIsWired(t *testing.T) {
+	router := NewRouter(RouterConfig{
+		ServiceName: "paycore-api",
+		Version:     "test-version",
+		StartedAt:   time.Date(2026, 6, 6, 12, 0, 0, 0, time.UTC),
+		Logger:      slog.Default(),
+		MetricsHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+			_, _ = w.Write([]byte("paycore_test_metric 1\n"))
+		}),
+	})
+
+	request := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, response.Code)
+	}
+
+	if !bytes.Contains(response.Body.Bytes(), []byte("paycore_test_metric 1")) {
+		t.Fatalf("expected metrics body, got %q", response.Body.String())
+	}
+}
+
+func TestHTTPMetricsAreRecordedWithRoutePattern(t *testing.T) {
+	appMetrics := metrics.New()
+	router := NewRouter(RouterConfig{
+		ServiceName:    "paycore-api",
+		Version:        "test-version",
+		StartedAt:      time.Date(2026, 6, 6, 12, 0, 0, 0, time.UTC),
+		Logger:         slog.Default(),
+		MetricsHandler: appMetrics.Handler(),
+		Metrics:        appMetrics,
+	})
+
+	versionRequest := httptest.NewRequest(http.MethodGet, "/version", nil)
+	versionResponse := httptest.NewRecorder()
+	router.ServeHTTP(versionResponse, versionRequest)
+
+	if versionResponse.Code != http.StatusOK {
+		t.Fatalf("expected version status %d, got %d", http.StatusOK, versionResponse.Code)
+	}
+
+	metricsRequest := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	metricsResponse := httptest.NewRecorder()
+	router.ServeHTTP(metricsResponse, metricsRequest)
+
+	if metricsResponse.Code != http.StatusOK {
+		t.Fatalf("expected metrics status %d, got %d", http.StatusOK, metricsResponse.Code)
+	}
+
+	body := metricsResponse.Body.Bytes()
+	if !bytes.Contains(body, []byte(`paycore_http_requests_total{method="GET",route="/version",status="200"} 1`)) {
+		t.Fatalf("expected /version request metric, got:\n%s", metricsResponse.Body.String())
 	}
 }
 

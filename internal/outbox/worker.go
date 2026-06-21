@@ -15,21 +15,29 @@ var (
 )
 
 type Worker struct {
-	repository Repository
-	publisher  Publisher
-	transactor db.Transactor
-	workerID   string
-	batchSize  int
-	now        func() time.Time
+	repository    Repository
+	publisher     Publisher
+	transactor    db.Transactor
+	metrics       MetricsRecorder
+	workerID      string
+	batchSize     int
+	publisherName string
+	now           func() time.Time
 }
 
 type WorkerConfig struct {
-	Repository Repository
-	Publisher  Publisher
-	Transactor db.Transactor
-	WorkerID   string
-	BatchSize  int
-	Now        func() time.Time
+	Repository    Repository
+	Publisher     Publisher
+	Transactor    db.Transactor
+	Metrics       MetricsRecorder
+	WorkerID      string
+	BatchSize     int
+	PublisherName string
+	Now           func() time.Time
+}
+
+type MetricsRecorder interface {
+	ObserveOutboxBatch(publisher string, claimed int, published int, failed int)
 }
 
 type ProcessBatchResult struct {
@@ -59,17 +67,23 @@ func NewWorker(config WorkerConfig) (*Worker, error) {
 		config.WorkerID = "outbox-worker"
 	}
 
+	if config.PublisherName == "" {
+		config.PublisherName = "unknown"
+	}
+
 	if config.Now == nil {
 		config.Now = time.Now
 	}
 
 	return &Worker{
-		repository: config.Repository,
-		publisher:  config.Publisher,
-		transactor: config.Transactor,
-		workerID:   config.WorkerID,
-		batchSize:  config.BatchSize,
-		now:        config.Now,
+		repository:    config.Repository,
+		publisher:     config.Publisher,
+		transactor:    config.Transactor,
+		metrics:       config.Metrics,
+		workerID:      config.WorkerID,
+		batchSize:     config.BatchSize,
+		publisherName: config.PublisherName,
+		now:           config.Now,
 	}, nil
 }
 
@@ -117,5 +131,15 @@ func (w *Worker) ProcessBatch(ctx context.Context) (ProcessBatchResult, error) {
 		result.Published++
 	}
 
+	w.observeOutboxBatch(result)
+
 	return result, nil
+}
+
+func (w *Worker) observeOutboxBatch(result ProcessBatchResult) {
+	if w.metrics == nil {
+		return
+	}
+
+	w.metrics.ObserveOutboxBatch(w.publisherName, result.Claimed, result.Published, result.Failed)
 }

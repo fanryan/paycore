@@ -31,6 +31,7 @@ import (
 	ratelimitredis "github.com/fanryan/paycore/internal/ratelimit/adapters/redis"
 	"github.com/fanryan/paycore/internal/shared/config"
 	"github.com/fanryan/paycore/internal/shared/db"
+	"github.com/fanryan/paycore/internal/shared/metrics"
 	"github.com/jackc/pgx/v5/pgxpool"
 	goredis "github.com/redis/go-redis/v9"
 )
@@ -90,6 +91,7 @@ func main() {
 	)
 	idempotencyService := idempotency.NewServiceWithCache(repositories.idempotency, idempotencyCache, 24*time.Hour)
 	paymentHandler := payment.NewHandlerWithIdempotency(paymentService, idempotencyService)
+	appMetrics := metrics.New()
 
 	server := &http.Server{
 		Addr: cfg.HTTPAddr,
@@ -101,6 +103,8 @@ func main() {
 			MerchantHandler: merchantHandler,
 			PayerHandler:    payerHandler,
 			PaymentHandler:  paymentHandler,
+			MetricsHandler:  appMetrics.Handler(),
+			Metrics:         appMetrics,
 			RateLimiter:     rateLimiter,
 		}),
 		ReadHeaderTimeout: cfg.HTTPReadHeaderTimeout,

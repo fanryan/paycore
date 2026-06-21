@@ -80,6 +80,42 @@ func TestServiceCreatesCompletedBatchWithLineItems(t *testing.T) {
 	}
 }
 
+func TestServiceRecordsSettlementBatchMetrics(t *testing.T) {
+	repository := &fakeRepository{
+		claimed: []settlement.ClaimedPayment{
+			{
+				PaymentID:   "pay-1",
+				MerchantID:  "merchant-1",
+				AmountMinor: 4000,
+				Currency:    "USD",
+				CapturedAt:  testNow().Add(-time.Minute),
+			},
+		},
+	}
+	metrics := &fakeMetricsRecorder{}
+	service := newSettlementServiceWithMetrics(t, repository, newFakePaymentRepository(t, "pay-1"), &fakeOutboxRepository{}, metrics)
+
+	_, err := service.CreateBatch(context.Background(), settlement.CreateBatchInput{
+		WindowStart: testNow().Add(-time.Hour),
+		WindowEnd:   testNow(),
+	})
+	if err != nil {
+		t.Fatalf("expected create batch to succeed, got error: %v", err)
+	}
+
+	if len(metrics.batches) != 1 {
+		t.Fatalf("expected 1 batch metric, got %d", len(metrics.batches))
+	}
+
+	if metrics.batches[0].status != string(settlement.BatchStatusCompleted) {
+		t.Fatalf("expected COMPLETED metric, got %q", metrics.batches[0].status)
+	}
+
+	if metrics.batches[0].payments != 1 {
+		t.Fatalf("expected 1 settled payment metric, got %d", metrics.batches[0].payments)
+	}
+}
+
 func TestServiceCompletesEmptyBatchWhenNoPaymentsAreClaimed(t *testing.T) {
 	repository := &fakeRepository{}
 	service := newSettlementService(t, repository, newFakePaymentRepository(t), &fakeOutboxRepository{})
@@ -169,6 +205,49 @@ func TestServiceRecoversStaleProcessingBatch(t *testing.T) {
 	}
 }
 
+func TestServiceRecordsStaleRecoveryMetrics(t *testing.T) {
+	staleBatch := staleProcessingBatch(t, "batch-stale-1")
+	repository := &fakeRepository{
+		batches: map[string]settlement.Batch{
+			staleBatch.ID: staleBatch,
+		},
+		staleBatches: []settlement.Batch{staleBatch},
+		claimedByBatch: map[string][]settlement.ClaimedPayment{
+			staleBatch.ID: {
+				{
+					PaymentID:       "pay-1",
+					MerchantID:      "merchant-1",
+					AmountMinor:     4000,
+					Currency:        "USD",
+					CapturedAt:      testNow().Add(-time.Minute),
+					SettlementBatch: staleBatch.ID,
+				},
+			},
+		},
+	}
+	metrics := &fakeMetricsRecorder{}
+	service := newSettlementServiceWithMetrics(t, repository, newFakePaymentRepository(t, "pay-1"), &fakeOutboxRepository{}, metrics)
+
+	_, err := service.RecoverStaleBatches(context.Background(), settlement.RecoverStaleBatchesInput{
+		Limit: 5,
+	})
+	if err != nil {
+		t.Fatalf("expected recovery to succeed, got error: %v", err)
+	}
+
+	if metrics.recoveredBatches != 1 {
+		t.Fatalf("expected 1 recovered batch metric, got %d", metrics.recoveredBatches)
+	}
+
+	if len(metrics.batches) != 1 {
+		t.Fatalf("expected 1 batch metric, got %d", len(metrics.batches))
+	}
+
+	if metrics.batches[0].payments != 1 {
+		t.Fatalf("expected 1 recovered payment metric, got %d", metrics.batches[0].payments)
+	}
+}
+
 func TestServiceReturnsErrorWhenDependenciesMissing(t *testing.T) {
 	_, err := settlement.NewService(settlement.ServiceConfig{
 		Transactor: db.NoopTransactor{},
@@ -209,11 +288,18 @@ func TestServiceReturnsValidationErrorForInvalidWindow(t *testing.T) {
 func newSettlementService(t *testing.T, repository settlement.Repository, payments payment.Repository, outboxRepository outbox.Repository) *settlement.Service {
 	t.Helper()
 
+	return newSettlementServiceWithMetrics(t, repository, payments, outboxRepository, nil)
+}
+
+func newSettlementServiceWithMetrics(t *testing.T, repository settlement.Repository, payments payment.Repository, outboxRepository outbox.Repository, metrics settlement.MetricsRecorder) *settlement.Service {
+	t.Helper()
+
 	service, err := settlement.NewService(settlement.ServiceConfig{
 		Repository: repository,
 		Payments:   payments,
 		Outbox:     outboxRepository,
 		Transactor: db.NoopTransactor{},
+		Metrics:    metrics,
 		WorkerID:   "worker-1",
 		ClaimLimit: 10,
 		LockTTL:    time.Minute,
@@ -466,4 +552,27 @@ func (r *fakeOutboxRepository) MarkEventPublished(ctx context.Context, eventID s
 
 func (r *fakeOutboxRepository) MarkEventFailed(ctx context.Context, input outbox.MarkEventFailedInput) (outbox.Event, error) {
 	return outbox.Event{}, errors.New("not implemented")
+}
+
+type fakeMetricsRecorder struct {
+	batches          []fakeSettlementBatchMetric
+	recoveredBatches int
+}
+
+type fakeSettlementBatchMetric struct {
+	status   string
+	payments int
+	duration time.Duration
+}
+
+func (r *fakeMetricsRecorder) ObserveSettlementBatch(status string, payments int, duration time.Duration) {
+	r.batches = append(r.batches, fakeSettlementBatchMetric{
+		status:   status,
+		payments: payments,
+		duration: duration,
+	})
+}
+
+func (r *fakeMetricsRecorder) ObserveSettlementRecoveredBatches(count int) {
+	r.recoveredBatches += count
 }

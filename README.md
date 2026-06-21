@@ -58,6 +58,8 @@ Current development stage:
 - Settlement service implemented for batch creation, captured-payment claims, line items, payment `SETTLED` transitions, `payment.settled` outbox events, and batch completion
 - One-shot settlement worker implemented for previous-window batch creation
 - Settlement stale batch recovery implemented by resuming expired `PROCESSING` batches before new work
+- Prometheus metrics foundation implemented for API HTTP requests, settlement batches, settlement recovery, and outbox publishing
+- API exposes `GET /metrics`; outbox and settlement workers expose `/metrics` on `PAYCORE_METRICS_ADDR`
 - Shared currency normalization and validation implemented
 - Shared random id helper implemented
 - Central HTTP router migrated to chi for path parameters and feature route composition
@@ -76,6 +78,7 @@ Implemented endpoints:
 GET /healthz
 GET /readyz
 GET /version
+GET /metrics
 POST /merchants
 GET /merchants
 POST /payers
@@ -84,7 +87,7 @@ POST /payments/authorize
 POST /payments/{payment_id}/capture
 ```
 
-Runtime wiring to PostgreSQL repositories is available through `PAYCORE_REPOSITORY_BACKEND=postgres`. Memory repositories remain the default. Redis-backed rate limiting, Redis-backed idempotency response caching, and Kafka-backed outbox publishing are implemented but opt-in. Settlement domain, schema, repository, service, one-shot worker, and stale batch recovery are implemented. Settlement HTTP APIs and Prometheus have not been implemented yet.
+Runtime wiring to PostgreSQL repositories is available through `PAYCORE_REPOSITORY_BACKEND=postgres`. Memory repositories remain the default. Redis-backed rate limiting, Redis-backed idempotency response caching, and Kafka-backed outbox publishing are implemented but opt-in. Settlement domain, schema, repository, service, one-shot worker, and stale batch recovery are implemented. Prometheus metrics are exposed by the API and workers, but Prometheus Docker Compose scraping and dashboards are not implemented yet. Settlement HTTP APIs have not been implemented yet.
 
 Payment authorization and capture enforce `Idempotency-Key`. In memory mode, idempotency records are process-local. In Postgres mode, merchant, payer, payment, hold, idempotency, and outbox records use PostgreSQL repositories. Payment authorization and capture business mutations plus outbox event creation run through a service-level transaction boundary in Postgres mode. Redis-backed rate limiting fails closed if Redis is unavailable. Redis-backed idempotency caching falls back to durable records if Redis is unavailable.
 
@@ -147,6 +150,7 @@ Start the outbox worker with the default logging publisher:
 
 ```bash
 PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=disable' \
+PAYCORE_METRICS_ADDR=:9091 \
 go run ./cmd/paycore-outbox-worker
 ```
 
@@ -157,6 +161,7 @@ PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=
 PAYCORE_OUTBOX_PUBLISHER=kafka \
 PAYCORE_KAFKA_BROKERS=localhost:9092 \
 PAYCORE_KAFKA_OUTBOX_TOPIC=paycore.outbox.events \
+PAYCORE_METRICS_ADDR=:9091 \
 go run ./cmd/paycore-outbox-worker
 ```
 
@@ -166,6 +171,7 @@ Run one settlement batch for the previous completed window:
 
 ```bash
 PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=disable' \
+PAYCORE_METRICS_ADDR=:9092 \
 go run ./cmd/paycore-settlement-worker
 ```
 
@@ -174,6 +180,7 @@ Override the settlement window:
 ```bash
 PAYCORE_SETTLEMENT_WINDOW_MINUTES=30 \
 PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=disable' \
+PAYCORE_METRICS_ADDR=:9092 \
 go run ./cmd/paycore-settlement-worker
 ```
 
@@ -191,6 +198,7 @@ Supported local configuration:
 | --- | --- | --- |
 | `PAYCORE_ENV` | `local` | Runtime environment label used in startup logs |
 | `PAYCORE_HTTP_ADDR` | `:8080` | HTTP listen address |
+| `PAYCORE_METRICS_ADDR` | `:9091` | Metrics listen address used by worker commands |
 | `PAYCORE_HTTP_READ_HEADER_TIMEOUT_SECONDS` | `5` | HTTP read header timeout in seconds |
 | `PAYCORE_HTTP_SHUTDOWN_TIMEOUT_SECONDS` | `10` | Graceful shutdown timeout in seconds |
 | `PAYCORE_REPOSITORY_BACKEND` | `memory` | Repository backend: `memory` or `postgres` |
@@ -215,6 +223,14 @@ Test the current endpoints:
 curl http://localhost:8080/healthz
 curl http://localhost:8080/readyz
 curl http://localhost:8080/version
+curl http://localhost:8080/metrics
+```
+
+Worker metrics are exposed on `PAYCORE_METRICS_ADDR`:
+
+```bash
+curl http://localhost:9091/metrics
+curl http://localhost:9092/metrics
 ```
 
 Create local in-memory records:

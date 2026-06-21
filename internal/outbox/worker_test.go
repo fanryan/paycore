@@ -54,6 +54,38 @@ func TestWorkerPublishesClaimedEvents(t *testing.T) {
 	}
 }
 
+func TestWorkerRecordsOutboxMetricsForPublishedEvents(t *testing.T) {
+	ctx := context.Background()
+	store := outboxmemory.NewStore()
+	publisher := &fakePublisher{}
+	metrics := &fakeMetricsRecorder{}
+	worker := newTestWorkerWithMetrics(t, store, publisher, metrics)
+
+	createEvent(t, store, "payment-1", "payment.authorized")
+
+	result, err := worker.ProcessBatch(ctx)
+	if err != nil {
+		t.Fatalf("expected process batch to succeed, got error: %v", err)
+	}
+
+	if result.Published != 1 {
+		t.Fatalf("expected published 1, got %d", result.Published)
+	}
+
+	if len(metrics.batches) != 1 {
+		t.Fatalf("expected 1 metric batch, got %d", len(metrics.batches))
+	}
+
+	batch := metrics.batches[0]
+	if batch.publisher != "test-publisher" {
+		t.Fatalf("expected publisher test-publisher, got %q", batch.publisher)
+	}
+
+	if batch.claimed != 1 || batch.published != 1 || batch.failed != 0 {
+		t.Fatalf("unexpected metric batch: %+v", batch)
+	}
+}
+
 func TestWorkerMarksFailedPublishForRetry(t *testing.T) {
 	ctx := context.Background()
 	store := outboxmemory.NewStore()
@@ -92,6 +124,36 @@ func TestWorkerMarksFailedPublishForRetry(t *testing.T) {
 
 	if !stored.AvailableAt.After(testNow()) {
 		t.Fatalf("expected retry availability after now, got %s", stored.AvailableAt)
+	}
+}
+
+func TestWorkerRecordsOutboxMetricsForFailedPublish(t *testing.T) {
+	ctx := context.Background()
+	store := outboxmemory.NewStore()
+	publisher := &fakePublisher{
+		err: errors.New("publisher unavailable"),
+	}
+	metrics := &fakeMetricsRecorder{}
+	worker := newTestWorkerWithMetrics(t, store, publisher, metrics)
+
+	createEvent(t, store, "payment-1", "payment.authorized")
+
+	result, err := worker.ProcessBatch(ctx)
+	if err != nil {
+		t.Fatalf("expected process batch to succeed, got error: %v", err)
+	}
+
+	if result.Failed != 1 {
+		t.Fatalf("expected failed 1, got %d", result.Failed)
+	}
+
+	if len(metrics.batches) != 1 {
+		t.Fatalf("expected 1 metric batch, got %d", len(metrics.batches))
+	}
+
+	batch := metrics.batches[0]
+	if batch.claimed != 1 || batch.published != 0 || batch.failed != 1 {
+		t.Fatalf("unexpected metric batch: %+v", batch)
 	}
 }
 
@@ -144,13 +206,21 @@ func TestNewWorkerValidatesRequiredDependencies(t *testing.T) {
 func newTestWorker(t *testing.T, repository outbox.Repository, publisher outbox.Publisher) *outbox.Worker {
 	t.Helper()
 
+	return newTestWorkerWithMetrics(t, repository, publisher, nil)
+}
+
+func newTestWorkerWithMetrics(t *testing.T, repository outbox.Repository, publisher outbox.Publisher, metrics outbox.MetricsRecorder) *outbox.Worker {
+	t.Helper()
+
 	worker, err := outbox.NewWorker(outbox.WorkerConfig{
-		Repository: repository,
-		Publisher:  publisher,
-		Transactor: db.NoopTransactor{},
-		WorkerID:   "worker-1",
-		BatchSize:  10,
-		Now:        testNow,
+		Repository:    repository,
+		Publisher:     publisher,
+		Transactor:    db.NoopTransactor{},
+		Metrics:       metrics,
+		WorkerID:      "worker-1",
+		BatchSize:     10,
+		PublisherName: "test-publisher",
+		Now:           testNow,
 	})
 	if err != nil {
 		t.Fatalf("expected worker create to succeed, got error: %v", err)
@@ -216,6 +286,26 @@ func (p *fakePublisher) Publish(ctx context.Context, event outbox.Event) error {
 	p.published = append(p.published, event)
 
 	return nil
+}
+
+type fakeMetricsRecorder struct {
+	batches []fakeOutboxBatchMetric
+}
+
+type fakeOutboxBatchMetric struct {
+	publisher string
+	claimed   int
+	published int
+	failed    int
+}
+
+func (r *fakeMetricsRecorder) ObserveOutboxBatch(publisher string, claimed int, published int, failed int) {
+	r.batches = append(r.batches, fakeOutboxBatchMetric{
+		publisher: publisher,
+		claimed:   claimed,
+		published: published,
+		failed:    failed,
+	})
 }
 
 func testNow() time.Time {

@@ -62,6 +62,7 @@ func TestLoadWorkerConfigUsesDefaults(t *testing.T) {
 
 	cfg := loadWorkerConfig(config.Config{
 		DatabaseURL: "postgres://example",
+		MetricsAddr: ":9191",
 	})
 
 	if cfg.databaseURL != "postgres://example" {
@@ -82,6 +83,10 @@ func TestLoadWorkerConfigUsesDefaults(t *testing.T) {
 
 	if cfg.lockTTL != defaultLockMinutes*time.Minute {
 		t.Fatalf("expected lock ttl %s, got %s", defaultLockMinutes*time.Minute, cfg.lockTTL)
+	}
+
+	if cfg.metricsAddr != ":9191" {
+		t.Fatalf("expected metrics addr :9191, got %q", cfg.metricsAddr)
 	}
 }
 

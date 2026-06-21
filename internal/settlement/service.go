@@ -30,6 +30,7 @@ type Service struct {
 	payments   payment.Repository
 	outbox     outbox.Repository
 	transactor db.Transactor
+	metrics    MetricsRecorder
 	workerID   string
 	claimLimit int
 	lockTTL    time.Duration
@@ -41,10 +42,16 @@ type ServiceConfig struct {
 	Payments   payment.Repository
 	Outbox     outbox.Repository
 	Transactor db.Transactor
+	Metrics    MetricsRecorder
 	WorkerID   string
 	ClaimLimit int
 	LockTTL    time.Duration
 	Now        func() time.Time
+}
+
+type MetricsRecorder interface {
+	ObserveSettlementBatch(status string, payments int, duration time.Duration)
+	ObserveSettlementRecoveredBatches(count int)
 }
 
 type CreateBatchInput struct {
@@ -116,6 +123,7 @@ func NewService(config ServiceConfig) (*Service, error) {
 		payments:   config.Payments,
 		outbox:     config.Outbox,
 		transactor: config.Transactor,
+		metrics:    config.Metrics,
 		workerID:   config.WorkerID,
 		claimLimit: config.ClaimLimit,
 		lockTTL:    config.LockTTL,
@@ -125,6 +133,7 @@ func NewService(config ServiceConfig) (*Service, error) {
 
 func (s *Service) CreateBatch(ctx context.Context, input CreateBatchInput) (CreateBatchResult, error) {
 	var result CreateBatchResult
+	startedAt := time.Now()
 
 	err := s.transactor.WithinTx(ctx, func(ctx context.Context) error {
 		now := s.now().UTC()
@@ -196,14 +205,19 @@ func (s *Service) CreateBatch(ctx context.Context, input CreateBatchInput) (Crea
 		return nil
 	})
 	if err != nil {
+		s.observeSettlementBatch("FAILED", 0, time.Since(startedAt))
 		return CreateBatchResult{}, err
 	}
+
+	s.observeSettlementBatch(string(result.Batch.Status), len(result.Payments), time.Since(startedAt))
 
 	return result, nil
 }
 
 func (s *Service) RecoverStaleBatches(ctx context.Context, input RecoverStaleBatchesInput) (RecoverStaleBatchesResult, error) {
 	var result RecoverStaleBatchesResult
+	startedAt := time.Now()
+	batchPaymentCounts := make([]int, 0)
 
 	limit := input.Limit
 	if limit <= 0 {
@@ -259,12 +273,19 @@ func (s *Service) RecoverStaleBatches(ctx context.Context, input RecoverStaleBat
 			result.Batches = append(result.Batches, batch)
 			result.LineItems = append(result.LineItems, lineItems...)
 			result.Payments = append(result.Payments, settledPayments...)
+			batchPaymentCounts = append(batchPaymentCounts, len(settledPayments))
 		}
 
 		return nil
 	})
 	if err != nil {
+		s.observeSettlementBatch("FAILED", 0, time.Since(startedAt))
 		return RecoverStaleBatchesResult{}, err
+	}
+
+	s.observeRecoveredBatches(len(result.Batches))
+	for index, batch := range result.Batches {
+		s.observeSettlementBatch(string(batch.Status), batchPaymentCounts[index], time.Since(startedAt))
 	}
 
 	return result, nil
@@ -343,4 +364,20 @@ func (s *Service) settleClaimedPayments(ctx context.Context, batchID string, cla
 	}
 
 	return lineItems, settledPayments, nil
+}
+
+func (s *Service) observeSettlementBatch(status string, payments int, duration time.Duration) {
+	if s.metrics == nil {
+		return
+	}
+
+	s.metrics.ObserveSettlementBatch(status, payments, duration)
+}
+
+func (s *Service) observeRecoveredBatches(count int) {
+	if s.metrics == nil {
+		return
+	}
+
+	s.metrics.ObserveSettlementRecoveredBatches(count)
 }

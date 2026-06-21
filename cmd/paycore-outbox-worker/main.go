@@ -14,6 +14,7 @@ import (
 	outboxpostgres "github.com/fanryan/paycore/internal/outbox/adapters/postgres"
 	"github.com/fanryan/paycore/internal/shared/config"
 	"github.com/fanryan/paycore/internal/shared/db"
+	"github.com/fanryan/paycore/internal/shared/metrics"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -35,6 +36,16 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
+	appMetrics := metrics.New()
+	shutdownMetrics := metrics.StartServer(ctx, cfg.MetricsAddr, appMetrics.Handler(), logger)
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := shutdownMetrics(shutdownCtx); err != nil {
+			logger.Error("metrics server shutdown failed", "error", err)
+		}
+	}()
+
 	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
 	if err != nil {
 		logger.Error("failed to create postgres pool", "error", err)
@@ -55,11 +66,13 @@ func main() {
 	defer closePublisher()
 
 	worker, err := outbox.NewWorker(outbox.WorkerConfig{
-		Repository: outboxpostgres.NewStore(pool),
-		Publisher:  publisher,
-		Transactor: db.NewPostgresTransactor(pool),
-		WorkerID:   workerID,
-		BatchSize:  batchSize,
+		Repository:    outboxpostgres.NewStore(pool),
+		Publisher:     publisher,
+		Transactor:    db.NewPostgresTransactor(pool),
+		Metrics:       appMetrics,
+		WorkerID:      workerID,
+		BatchSize:     batchSize,
+		PublisherName: cfg.OutboxPublisher,
 	})
 	if err != nil {
 		logger.Error("failed to create outbox worker", "error", err)

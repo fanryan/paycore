@@ -16,6 +16,7 @@ import (
 	settlementpostgres "github.com/fanryan/paycore/internal/settlement/adapters/postgres"
 	"github.com/fanryan/paycore/internal/shared/config"
 	"github.com/fanryan/paycore/internal/shared/db"
+	"github.com/fanryan/paycore/internal/shared/metrics"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -32,6 +33,7 @@ type workerConfig struct {
 	windowMinutes int
 	claimLimit    int
 	lockTTL       time.Duration
+	metricsAddr   string
 }
 
 type settlementWindow struct {
@@ -51,6 +53,16 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
+	appMetrics := metrics.New()
+	shutdownMetrics := metrics.StartServer(ctx, cfg.metricsAddr, appMetrics.Handler(), logger)
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := shutdownMetrics(shutdownCtx); err != nil {
+			logger.Error("metrics server shutdown failed", "error", err)
+		}
+	}()
+
 	pool, err := pgxpool.New(ctx, cfg.databaseURL)
 	if err != nil {
 		logger.Error("failed to create postgres pool", "error", err)
@@ -68,6 +80,7 @@ func main() {
 		Payments:   paymentpostgres.NewStore(pool),
 		Outbox:     outboxpostgres.NewStore(pool),
 		Transactor: db.NewPostgresTransactor(pool),
+		Metrics:    appMetrics,
 		WorkerID:   cfg.workerID,
 		ClaimLimit: cfg.claimLimit,
 		LockTTL:    cfg.lockTTL,
@@ -140,6 +153,7 @@ func loadWorkerConfig(base config.Config) workerConfig {
 		windowMinutes: intenv("PAYCORE_SETTLEMENT_WINDOW_MINUTES", defaultWindowMinutes),
 		claimLimit:    intenv("PAYCORE_SETTLEMENT_CLAIM_LIMIT", defaultClaimLimit),
 		lockTTL:       time.Duration(intenv("PAYCORE_SETTLEMENT_LOCK_MINUTES", defaultLockMinutes)) * time.Minute,
+		metricsAddr:   base.MetricsAddr,
 	}
 }
 

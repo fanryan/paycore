@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/fanryan/paycore/internal/ratelimit"
+	"github.com/fanryan/paycore/internal/shared/metrics"
+	"github.com/go-chi/chi/v5"
 )
 
 type contextKey string
@@ -122,6 +124,31 @@ func loggingMiddleware(logger *slog.Logger) func(http.Handler) http.Handler {
 	}
 }
 
+func metricsMiddleware(recorder *metrics.Metrics) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			startedAt := time.Now()
+			response := &responseRecorder{
+				ResponseWriter: w,
+			}
+
+			next.ServeHTTP(response, r)
+
+			statusCode := response.statusCode
+			if statusCode == 0 {
+				statusCode = http.StatusOK
+			}
+
+			recorder.ObserveHTTPRequest(
+				r.Method,
+				routePattern(r),
+				statusCode,
+				time.Since(startedAt),
+			)
+		})
+	}
+}
+
 func rateLimitMiddleware(limiter ratelimit.Limiter) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -153,6 +180,20 @@ func rateLimitMiddleware(limiter ratelimit.Limiter) func(http.Handler) http.Hand
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+func routePattern(r *http.Request) string {
+	routeContext := chi.RouteContext(r.Context())
+	if routeContext == nil {
+		return "unknown"
+	}
+
+	pattern := routeContext.RoutePattern()
+	if pattern == "" {
+		return "unmatched"
+	}
+
+	return pattern
 }
 
 func requestIDFromContext(ctx context.Context) string {

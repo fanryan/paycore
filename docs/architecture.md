@@ -29,6 +29,10 @@ The current repository contains the first API foundation:
 - Structured JSON request logging.
 - Panic recovery middleware with structured JSON errors.
 - Request body size limit middleware using a 1 MiB default.
+- Prometheus `/metrics` endpoint for the API.
+- Shared metrics registry and worker metrics server helper.
+- HTTP request metrics with route-pattern labels.
+- Settlement and outbox metrics.
 - Structured JSON error response shape.
 - Configuration loading from environment variables, including planned PostgreSQL and Redis settings.
 - Shared currency normalization and validation.
@@ -54,6 +58,7 @@ Current supported configuration:
 | --- | --- | --- |
 | `PAYCORE_ENV` | `local` | Runtime environment label used in startup logs |
 | `PAYCORE_HTTP_ADDR` | `:8080` | HTTP listen address |
+| `PAYCORE_METRICS_ADDR` | `:9091` | Metrics listen address used by worker commands |
 | `PAYCORE_HTTP_READ_HEADER_TIMEOUT_SECONDS` | `5` | HTTP read header timeout in seconds |
 | `PAYCORE_HTTP_SHUTDOWN_TIMEOUT_SECONDS` | `10` | Graceful shutdown timeout in seconds |
 | `PAYCORE_DATABASE_URL` | empty | PostgreSQL connection string for migrations and repository adapters |
@@ -134,6 +139,7 @@ internal/http.Router
   +--> GET /healthz
   +--> GET /readyz
   +--> GET /version
+  +--> GET /metrics
   +--> POST /merchants
   +--> GET /merchants
   +--> POST /payers

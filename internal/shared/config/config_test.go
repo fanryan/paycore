@@ -8,6 +8,7 @@ import (
 func TestLoadUsesDefaults(t *testing.T) {
 	t.Setenv("PAYCORE_ENV", "")
 	t.Setenv("PAYCORE_HTTP_ADDR", "")
+	t.Setenv("PAYCORE_METRICS_ADDR", "")
 	t.Setenv("PAYCORE_HTTP_READ_HEADER_TIMEOUT_SECONDS", "")
 	t.Setenv("PAYCORE_HTTP_SHUTDOWN_TIMEOUT_SECONDS", "")
 	t.Setenv("PAYCORE_DATABASE_URL", "")
@@ -30,6 +31,10 @@ func TestLoadUsesDefaults(t *testing.T) {
 
 	if cfg.HTTPAddr != ":8080" {
 		t.Fatalf("expected addr :8080, got %q", cfg.HTTPAddr)
+	}
+
+	if cfg.MetricsAddr != ":9091" {
+		t.Fatalf("expected metrics addr :9091, got %q", cfg.MetricsAddr)
 	}
 
 	if cfg.HTTPReadHeaderTimeout != 5*time.Second {
@@ -88,6 +93,7 @@ func TestLoadUsesDefaults(t *testing.T) {
 func TestLoadUsesEnvironmentOverrides(t *testing.T) {
 	t.Setenv("PAYCORE_ENV", "test")
 	t.Setenv("PAYCORE_HTTP_ADDR", ":9090")
+	t.Setenv("PAYCORE_METRICS_ADDR", ":9191")
 	t.Setenv("PAYCORE_HTTP_READ_HEADER_TIMEOUT_SECONDS", "7")
 	t.Setenv("PAYCORE_HTTP_SHUTDOWN_TIMEOUT_SECONDS", "12")
 	t.Setenv("PAYCORE_DATABASE_URL", "postgres://paycore:paycore@localhost:5432/paycore?sslmode=disable")
@@ -110,6 +116,10 @@ func TestLoadUsesEnvironmentOverrides(t *testing.T) {
 
 	if cfg.HTTPAddr != ":9090" {
 		t.Fatalf("expected addr :9090, got %q", cfg.HTTPAddr)
+	}
+
+	if cfg.MetricsAddr != ":9191" {
+		t.Fatalf("expected metrics addr :9191, got %q", cfg.MetricsAddr)
 	}
 
 	if cfg.HTTPReadHeaderTimeout != 7*time.Second {
