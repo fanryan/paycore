@@ -106,6 +106,7 @@ Optional health checks:
 docker exec paycore-postgres pg_isready -U paycore -d paycore
 docker exec paycore-redis redis-cli ping
 docker exec paycore-kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list
+curl http://localhost:9090/-/ready
 ```
 
 Apply local PostgreSQL migrations:
@@ -231,6 +232,22 @@ Worker metrics are exposed on `PAYCORE_METRICS_ADDR`:
 ```bash
 curl http://localhost:9091/metrics
 curl http://localhost:9092/metrics
+```
+
+Prometheus runs on port `9090` when started through Docker Compose:
+
+```bash
+docker compose up -d prometheus
+```
+
+Prometheus targets are available at `http://localhost:9090/targets`.
+
+The default `prometheus.yml` scrapes host-run PayCore processes at:
+
+```text
+host.docker.internal:8080  # API
+host.docker.internal:9091  # outbox worker
+host.docker.internal:9092  # settlement worker
 ```
 
 Create local in-memory records:

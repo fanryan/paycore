@@ -11,6 +11,8 @@ This document explains the current PayCore Prometheus metrics implementation as 
 - Shared metrics HTTP server helper in `internal/shared/metrics/server.go`.
 - API metrics endpoint at `GET /metrics`.
 - Worker metrics endpoints at `/metrics` on `PAYCORE_METRICS_ADDR`.
+- Prometheus service in `docker-compose.yml`.
+- Prometheus scrape configuration in `prometheus.yml`.
 - HTTP request counter:
   - `paycore_http_requests_total{method,route,status}`
 - HTTP request duration histogram:
@@ -38,8 +40,6 @@ This document explains the current PayCore Prometheus metrics implementation as 
 
 ### Not Implemented Yet
 
-- Prometheus service in `docker-compose.yml`.
-- Prometheus scrape configuration.
 - Grafana dashboards.
 - Redis rate-limit metrics.
 - Redis idempotency cache metrics.
@@ -63,6 +63,18 @@ GET /metrics
 ```
 
 on the address configured by `PAYCORE_METRICS_ADDR`.
+
+Prometheus UI is available locally at:
+
+```text
+http://localhost:9090
+```
+
+Prometheus targets are available locally at:
+
+```text
+http://localhost:9090/targets
+```
 
 ### Protected Endpoints Or Protected By Default
 
@@ -102,6 +114,12 @@ Settlement worker command:
 PAYCORE_METRICS_ADDR=:9092 go run ./cmd/paycore-settlement-worker
 ```
 
+Prometheus command:
+
+```bash
+docker compose up -d prometheus
+```
+
 ```text
 worker main()
   |
@@ -110,6 +128,14 @@ worker main()
   +--> starts metrics server on PAYCORE_METRICS_ADDR
   +--> wires metrics recorder into service/worker
   +--> runs worker logic
+```
+
+Current Prometheus scrape targets assume the API and workers run on the host machine:
+
+```text
+host.docker.internal:8080
+host.docker.internal:9091
+host.docker.internal:9092
 ```
 
 ### Feature Package Boundary
@@ -261,6 +287,14 @@ Records settlement batch, payment, and stale recovery metrics through a recorder
 
 Records outbox batch metrics through a recorder interface.
 
+`docker-compose.yml`
+
+Defines the local Prometheus service.
+
+`prometheus.yml`
+
+Defines local scrape targets for host-run PayCore processes.
+
 ## Checklist
 
 - [x] Add Prometheus client dependency.
@@ -270,8 +304,8 @@ Records outbox batch metrics through a recorder interface.
 - [x] Add settlement metrics.
 - [x] Add outbox metrics.
 - [x] Expose worker `/metrics` endpoints.
-- [ ] Add Prometheus to Docker Compose.
-- [ ] Add scrape configuration.
+- [x] Add Prometheus to Docker Compose.
+- [x] Add scrape configuration.
 - [ ] Add Redis rate-limit metrics.
 - [ ] Add Redis idempotency cache metrics.
 - [ ] Add outbox lag metrics.

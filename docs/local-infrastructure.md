@@ -11,8 +11,10 @@ The repository currently provides Docker Compose services for:
 - PostgreSQL in `docker-compose.yml`.
 - Redis in `docker-compose.yml`.
 - Kafka in `docker-compose.yml`.
-- Persistent Docker volumes for PostgreSQL, Redis, and Kafka.
-- Health checks for PostgreSQL, Redis, and Kafka.
+- Prometheus in `docker-compose.yml`.
+- Persistent Docker volumes for PostgreSQL, Redis, Kafka, and Prometheus.
+- Health checks for PostgreSQL, Redis, Kafka, and Prometheus.
+- Prometheus scrape configuration in `prometheus.yml`.
 - Local environment template in `.env.example`.
 - PostgreSQL merchant, payer, payment, hold, idempotency, outbox, and settlement schema migrations.
 - PostgreSQL repository runtime mode through `PAYCORE_REPOSITORY_BACKEND=postgres`.
@@ -28,13 +30,14 @@ Current services:
 paycore-postgres
 paycore-redis
 paycore-kafka
+paycore-prometheus
 ```
 
 ### Not Implemented Yet
 
 These are planned but not currently implemented:
 
-- Prometheus and Grafana.
+- Grafana.
 - Dockerized PayCore API service.
 
 ## 2. Local Services
@@ -73,6 +76,30 @@ Kafka is planned for asynchronous lifecycle event delivery after durable Postgre
 
 The local broker exists now so the outbox publisher adapter can be run against a repeatable dependency. The outbox worker defaults to a logging publisher, but can publish to Kafka when `PAYCORE_OUTBOX_PUBLISHER=kafka`.
 
+### Prometheus
+
+Prometheus scrapes the API and worker metrics endpoints.
+
+The current app processes run on the host, while Prometheus runs in Docker Compose. For that reason, `prometheus.yml` uses `host.docker.internal` targets:
+
+```text
+host.docker.internal:8080  # PayCore API
+host.docker.internal:9091  # Outbox worker metrics
+host.docker.internal:9092  # Settlement worker metrics
+```
+
+Prometheus UI:
+
+```text
+http://localhost:9090
+```
+
+Targets page:
+
+```text
+http://localhost:9090/targets
+```
+
 ## 3. Runtime Flow
 
 Current local infrastructure startup:
@@ -88,6 +115,7 @@ docker compose ps
 docker exec paycore-postgres pg_isready -U paycore -d paycore
 docker exec paycore-redis redis-cli ping
 docker exec paycore-kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list
+curl http://localhost:9090/-/ready
 ```
 
 Shutdown:
@@ -135,6 +163,7 @@ Current `.env.example` values:
 ```bash
 PAYCORE_ENV=local
 PAYCORE_HTTP_ADDR=:8080
+PAYCORE_METRICS_ADDR=:9091
 PAYCORE_HTTP_READ_HEADER_TIMEOUT_SECONDS=5
 PAYCORE_HTTP_SHUTDOWN_TIMEOUT_SECONDS=10
 
@@ -150,7 +179,7 @@ PAYCORE_IDEMPOTENCY_CACHE_ENABLED=false
 PAYCORE_IDEMPOTENCY_CACHE_TTL_SECONDS=86400
 ```
 
-The app currently loads the database URL, Redis address, Kafka brokers, Kafka outbox topic, outbox publisher backend, rate-limit settings, idempotency cache settings, and repository backend into shared configuration.
+The app currently loads the database URL, Redis address, Kafka brokers, Kafka outbox topic, outbox publisher backend, metrics address, rate-limit settings, idempotency cache settings, and repository backend into shared configuration.
 
 The API can run with PostgreSQL repositories when started with:
 
@@ -163,6 +192,8 @@ go run ./cmd/paycore-api
 Redis is available in Docker Compose. Redis-backed rate limiting is implemented for payment mutation routes when enabled. Redis-backed idempotency response caching is implemented for completed response replay when enabled.
 
 Kafka is available in Docker Compose. Kafka-backed outbox publishing is implemented behind `PAYCORE_OUTBOX_PUBLISHER=kafka`, while `logging` remains the default local worker mode.
+
+Prometheus is available in Docker Compose. The API exposes metrics on its API port at `/metrics`; worker commands expose metrics on `PAYCORE_METRICS_ADDR`.
 
 ## 6. Tests
 
@@ -188,7 +219,11 @@ PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=
 
 `docker-compose.yml`
 
-Defines local PostgreSQL, Redis, and Kafka services, ports, volumes, and health checks.
+Defines local PostgreSQL, Redis, Kafka, and Prometheus services, ports, volumes, and health checks.
+
+`prometheus.yml`
+
+Defines local scrape targets for host-run PayCore API and worker processes.
 
 `.env.example`
 
@@ -226,4 +261,6 @@ Applies local PostgreSQL migrations and records applied files in `schema_migrati
 - [x] Add Kafka-backed outbox publisher.
 - [x] Add Redis rate limiter.
 - [x] Add Redis idempotency response cache.
-- [ ] Add Prometheus and Grafana services.
+- [x] Add Prometheus service.
+- [x] Add Prometheus scrape configuration.
+- [ ] Add Grafana service.
