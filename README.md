@@ -62,6 +62,8 @@ Current development stage:
 - Outbox pending-event and publish-lag metrics implemented for backlog visibility
 - Rate-limit metrics implemented for allowed, rejected, Redis error, and check duration paths
 - Idempotency cache metrics implemented for hits, misses, errors, and durable fallback paths
+- Payment authorization and capture metrics implemented for result counts and service latency
+- Payer optimistic-lock conflict metrics implemented for balance mutation contention visibility
 - API exposes `GET /metrics`; outbox and settlement workers expose `/metrics` on `PAYCORE_METRICS_ADDR`
 - Shared currency normalization and validation implemented
 - Shared random id helper implemented

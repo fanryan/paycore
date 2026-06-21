@@ -83,12 +83,13 @@ func main() {
 	payerService := payer.NewPayerService(repositories.payers)
 	payerHandler := payer.NewHandler(payerService)
 
-	paymentService := payment.NewServiceWithTransactorAndOutbox(
+	paymentService := payment.NewServiceWithTransactorOutboxAndMetrics(
 		repositories.merchants,
 		repositories.payers,
 		repositories.payments,
 		repositories.transactor,
 		repositories.outbox,
+		appMetrics,
 	)
 	idempotencyService := idempotency.NewServiceWithCacheAndMetrics(repositories.idempotency, idempotencyCache, appMetrics, 24*time.Hour)
 	paymentHandler := payment.NewHandlerWithIdempotency(paymentService, idempotencyService)

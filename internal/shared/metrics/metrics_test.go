@@ -100,6 +100,29 @@ func TestMetricsExposeIdempotencyCollectors(t *testing.T) {
 	}
 }
 
+func TestMetricsExposePaymentCollectors(t *testing.T) {
+	appMetrics := metrics.New()
+
+	appMetrics.ObserveAuthorization("success", 10*time.Millisecond)
+	appMetrics.ObserveCapture("authorization_expired", 20*time.Millisecond)
+	appMetrics.ObservePayerVersionConflict()
+
+	body := gatherMetrics(t, appMetrics)
+	expectedMetrics := []string{
+		`paycore_authorization_total{result="success"} 1`,
+		`paycore_authorization_latency_seconds_count{result="success"} 1`,
+		`paycore_capture_total{result="authorization_expired"} 1`,
+		`paycore_capture_latency_seconds_count{result="authorization_expired"} 1`,
+		"paycore_payer_version_conflicts_total 1",
+	}
+
+	for _, expected := range expectedMetrics {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("expected metric output to contain %q, got:\n%s", expected, body)
+		}
+	}
+}
+
 func gatherMetrics(t *testing.T, appMetrics *metrics.Metrics) string {
 	t.Helper()
 

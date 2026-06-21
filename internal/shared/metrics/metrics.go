@@ -32,6 +32,11 @@ type Metrics struct {
 	idempotencyCacheMissesTotal      prometheus.Counter
 	idempotencyCacheErrorsTotal      prometheus.Counter
 	idempotencyPostgresFallbackTotal prometheus.Counter
+	authorizationTotal               *prometheus.CounterVec
+	authorizationLatency             *prometheus.HistogramVec
+	captureTotal                     *prometheus.CounterVec
+	captureLatency                   *prometheus.HistogramVec
+	payerVersionConflictsTotal       prometheus.Counter
 }
 
 func New() *Metrics {
@@ -168,6 +173,42 @@ func New() *Metrics {
 			Help: "Total idempotency requests served from durable records after cache miss or error.",
 		},
 	)
+	authorizationTotal := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "paycore_authorization_total",
+			Help: "Total payment authorization attempts by result.",
+		},
+		[]string{"result"},
+	)
+	authorizationLatency := prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "paycore_authorization_latency_seconds",
+			Help:    "Payment authorization service duration in seconds by result.",
+			Buckets: prometheus.DefBuckets,
+		},
+		[]string{"result"},
+	)
+	captureTotal := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "paycore_capture_total",
+			Help: "Total payment capture attempts by result.",
+		},
+		[]string{"result"},
+	)
+	captureLatency := prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "paycore_capture_latency_seconds",
+			Help:    "Payment capture service duration in seconds by result.",
+			Buckets: prometheus.DefBuckets,
+		},
+		[]string{"result"},
+	)
+	payerVersionConflictsTotal := prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "paycore_payer_version_conflicts_total",
+			Help: "Total payer optimistic-lock version conflicts observed by PayCore.",
+		},
+	)
 
 	registry.MustRegister(
 		collectors.NewGoCollector(),
@@ -192,6 +233,11 @@ func New() *Metrics {
 		idempotencyCacheMissesTotal,
 		idempotencyCacheErrorsTotal,
 		idempotencyPostgresFallbackTotal,
+		authorizationTotal,
+		authorizationLatency,
+		captureTotal,
+		captureLatency,
+		payerVersionConflictsTotal,
 	)
 
 	return &Metrics{
@@ -216,6 +262,11 @@ func New() *Metrics {
 		idempotencyCacheMissesTotal:      idempotencyCacheMissesTotal,
 		idempotencyCacheErrorsTotal:      idempotencyCacheErrorsTotal,
 		idempotencyPostgresFallbackTotal: idempotencyPostgresFallbackTotal,
+		authorizationTotal:               authorizationTotal,
+		authorizationLatency:             authorizationLatency,
+		captureTotal:                     captureTotal,
+		captureLatency:                   captureLatency,
+		payerVersionConflictsTotal:       payerVersionConflictsTotal,
 	}
 }
 
@@ -298,4 +349,18 @@ func (m *Metrics) ObserveIdempotencyCacheError() {
 
 func (m *Metrics) ObserveIdempotencyPostgresFallback() {
 	m.idempotencyPostgresFallbackTotal.Inc()
+}
+
+func (m *Metrics) ObserveAuthorization(result string, duration time.Duration) {
+	m.authorizationTotal.WithLabelValues(result).Inc()
+	m.authorizationLatency.WithLabelValues(result).Observe(duration.Seconds())
+}
+
+func (m *Metrics) ObserveCapture(result string, duration time.Duration) {
+	m.captureTotal.WithLabelValues(result).Inc()
+	m.captureLatency.WithLabelValues(result).Observe(duration.Seconds())
+}
+
+func (m *Metrics) ObservePayerVersionConflict() {
+	m.payerVersionConflictsTotal.Inc()
 }

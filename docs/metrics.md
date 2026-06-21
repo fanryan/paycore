@@ -39,6 +39,13 @@ This document explains the current PayCore Prometheus metrics implementation as 
   - `paycore_idempotency_cache_misses_total`
   - `paycore_idempotency_cache_errors_total`
   - `paycore_idempotency_postgres_fallback_total`
+- Payment lifecycle metrics:
+  - `paycore_authorization_total{result}`
+  - `paycore_authorization_latency_seconds{result}`
+  - `paycore_capture_total{result}`
+  - `paycore_capture_latency_seconds{result}`
+- Payer balance conflict metrics:
+  - `paycore_payer_version_conflicts_total`
 - Go runtime and process collectors:
   - Go runtime metrics
   - process metrics
@@ -47,14 +54,14 @@ This document explains the current PayCore Prometheus metrics implementation as 
   - HTTP route-pattern metric labels
   - concrete settlement collector output
   - concrete outbox collector output
+  - concrete payment collector output
   - settlement service metrics through a fake recorder
+  - payment service metrics through a fake recorder
   - outbox worker metrics through a fake recorder
 
 ### Not Implemented Yet
 
 - Grafana dashboards.
-- Payment authorization/capture metrics.
-- Payer optimistic-lock conflict metrics.
 
 ### Public Endpoints
 
@@ -238,6 +245,7 @@ Metric labels are intentionally low-cardinality:
 - Outbox labels use publisher backend names such as `logging` or `kafka`.
 - Settlement labels use stable batch statuses.
 - Rate-limit labels use stable result values such as `allowed`, `rejected`, and `redis_error`.
+- Payment labels use stable result values such as `success`, `payer_not_found`, `payer_version_conflict`, `insufficient_balance`, `not_capturable`, and `authorization_expired`.
 
 Do not add labels for raw IDs, idempotency keys, payer IDs, merchant IDs, payment IDs, request IDs, or error strings.
 

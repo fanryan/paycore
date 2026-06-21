@@ -33,7 +33,14 @@ type Service struct {
 	payments   Repository
 	outbox     outbox.Repository
 	transactor db.Transactor
+	metrics    MetricsRecorder
 	now        func() time.Time
+}
+
+type MetricsRecorder interface {
+	ObserveAuthorization(result string, duration time.Duration)
+	ObserveCapture(result string, duration time.Duration)
+	ObservePayerVersionConflict()
 }
 
 type AuthorizePaymentInput struct {
@@ -112,6 +119,24 @@ func NewServiceWithTransactorAndOutbox(
 	transactor db.Transactor,
 	outboxRepository outbox.Repository,
 ) *Service {
+	return NewServiceWithTransactorOutboxAndMetrics(
+		merchants,
+		payers,
+		payments,
+		transactor,
+		outboxRepository,
+		nil,
+	)
+}
+
+func NewServiceWithTransactorOutboxAndMetrics(
+	merchants merchant.MerchantRepository,
+	payers payer.PayerRepository,
+	payments Repository,
+	transactor db.Transactor,
+	outboxRepository outbox.Repository,
+	metrics MetricsRecorder,
+) *Service {
 	if transactor == nil {
 		transactor = db.NoopTransactor{}
 	}
@@ -126,11 +151,13 @@ func NewServiceWithTransactorAndOutbox(
 		payments:   payments,
 		outbox:     outboxRepository,
 		transactor: transactor,
+		metrics:    metrics,
 		now:        time.Now,
 	}
 }
 
 func (s *Service) AuthorizePayment(ctx context.Context, input AuthorizePaymentInput) (AuthorizePaymentResult, error) {
+	startedAt := time.Now()
 	var result AuthorizePaymentResult
 
 	err := s.transactor.WithinTx(ctx, func(ctx context.Context) error {
@@ -247,13 +274,17 @@ func (s *Service) AuthorizePayment(ctx context.Context, input AuthorizePaymentIn
 		return nil
 	})
 	if err != nil {
+		s.observePayerVersionConflict(err)
+		s.observeAuthorization(paymentMetricResult(err), time.Since(startedAt))
 		return AuthorizePaymentResult{}, err
 	}
 
+	s.observeAuthorization("success", time.Since(startedAt))
 	return result, nil
 }
 
 func (s *Service) CapturePayment(ctx context.Context, input CapturePaymentInput) (CapturePaymentResult, error) {
+	startedAt := time.Now()
 	var result CapturePaymentResult
 
 	err := s.transactor.WithinTx(ctx, func(ctx context.Context) error {
@@ -344,8 +375,62 @@ func (s *Service) CapturePayment(ctx context.Context, input CapturePaymentInput)
 		return nil
 	})
 	if err != nil {
+		s.observePayerVersionConflict(err)
+		s.observeCapture(paymentMetricResult(err), time.Since(startedAt))
 		return CapturePaymentResult{}, err
 	}
 
+	s.observeCapture("success", time.Since(startedAt))
 	return result, nil
+}
+
+func (s *Service) observeAuthorization(result string, duration time.Duration) {
+	if s.metrics == nil {
+		return
+	}
+
+	s.metrics.ObserveAuthorization(result, duration)
+}
+
+func (s *Service) observeCapture(result string, duration time.Duration) {
+	if s.metrics == nil {
+		return
+	}
+
+	s.metrics.ObserveCapture(result, duration)
+}
+
+func (s *Service) observePayerVersionConflict(err error) {
+	if s.metrics == nil || !errors.Is(err, payer.ErrPayerVersionConflict) {
+		return
+	}
+
+	s.metrics.ObservePayerVersionConflict()
+}
+
+func paymentMetricResult(err error) string {
+	switch {
+	case errors.Is(err, merchant.ErrMerchantNotFound):
+		return "merchant_not_found"
+	case errors.Is(err, ErrMerchantCannotCreatePayments):
+		return "merchant_cannot_create_payments"
+	case errors.Is(err, payer.ErrPayerNotFound):
+		return "payer_not_found"
+	case errors.Is(err, payer.ErrPayerVersionConflict):
+		return "payer_version_conflict"
+	case errors.Is(err, ErrPayerCurrencyMismatch):
+		return "currency_mismatch"
+	case errors.Is(err, ErrInsufficientAvailableBalance):
+		return "insufficient_balance"
+	case errors.Is(err, ErrPaymentNotFound):
+		return "payment_not_found"
+	case errors.Is(err, ErrHoldNotFound):
+		return "hold_not_found"
+	case errors.Is(err, ErrPaymentNotCapturable):
+		return "not_capturable"
+	case errors.Is(err, ErrAuthorizationExpired):
+		return "authorization_expired"
+	default:
+		return "error"
+	}
 }

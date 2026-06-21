@@ -194,6 +194,73 @@ func TestServiceRejectsInsufficientAvailableBalance(t *testing.T) {
 	}
 }
 
+func TestServiceRecordsAuthorizationMetrics(t *testing.T) {
+	ctx := context.Background()
+	metrics := &fakeMetricsRecorder{}
+	fixture := newFixtureWithMetrics(t, metrics)
+
+	_, err := fixture.service.AuthorizePayment(ctx, payment.AuthorizePaymentInput{
+		MerchantID:  "merchant-1",
+		PayerID:     "payer-1",
+		AmountMinor: 4_000,
+		Currency:    "USD",
+	})
+	if err != nil {
+		t.Fatalf("expected authorization to succeed, got error: %v", err)
+	}
+
+	metrics.assertAuthorization(t, 0, "success")
+}
+
+func TestServiceRecordsAuthorizationFailureMetrics(t *testing.T) {
+	metrics := &fakeMetricsRecorder{}
+	fixture := newFixtureWithMetrics(t, metrics)
+
+	_, err := fixture.service.AuthorizePayment(context.Background(), payment.AuthorizePaymentInput{
+		MerchantID:  "merchant-1",
+		PayerID:     "missing",
+		AmountMinor: 4_000,
+		Currency:    "USD",
+	})
+	if !errors.Is(err, payer.ErrPayerNotFound) {
+		t.Fatalf("expected ErrPayerNotFound, got %v", err)
+	}
+
+	metrics.assertAuthorization(t, 0, "payer_not_found")
+}
+
+func TestServiceRecordsPayerVersionConflictMetrics(t *testing.T) {
+	metrics := &fakeMetricsRecorder{}
+	fixture := newFixtureWithMetrics(t, metrics)
+	conflictingPayers := &conflictPayerRepository{
+		PayerRepository: fixture.payers,
+	}
+	fixture.service = payment.NewServiceWithTransactorOutboxAndMetrics(
+		fixture.merchants,
+		conflictingPayers,
+		fixture.payments,
+		db.NoopTransactor{},
+		fixture.outbox,
+		metrics,
+	)
+
+	_, err := fixture.service.AuthorizePayment(context.Background(), payment.AuthorizePaymentInput{
+		MerchantID:  "merchant-1",
+		PayerID:     "payer-1",
+		AmountMinor: 4_000,
+		Currency:    "USD",
+	})
+	if !errors.Is(err, payer.ErrPayerVersionConflict) {
+		t.Fatalf("expected ErrPayerVersionConflict, got %v", err)
+	}
+
+	metrics.assertAuthorization(t, 0, "payer_version_conflict")
+
+	if metrics.payerVersionConflicts != 1 {
+		t.Fatalf("expected 1 payer version conflict metric, got %d", metrics.payerVersionConflicts)
+	}
+}
+
 func TestServiceCapturesPayment(t *testing.T) {
 	ctx := context.Background()
 	fixture := newFixture(t)
@@ -266,6 +333,36 @@ func TestServiceCapturesPayment(t *testing.T) {
 	if payload["hold_id"] != result.Hold.ID {
 		t.Fatalf("expected outbox hold_id %q, got %v", result.Hold.ID, payload["hold_id"])
 	}
+}
+
+func TestServiceRecordsCaptureMetrics(t *testing.T) {
+	ctx := context.Background()
+	metrics := &fakeMetricsRecorder{}
+	fixture := newFixtureWithMetrics(t, metrics)
+	authorized := authorizePayment(t, fixture)
+
+	_, err := fixture.service.CapturePayment(ctx, payment.CapturePaymentInput{
+		PaymentID: authorized.Payment.ID,
+	})
+	if err != nil {
+		t.Fatalf("expected capture to succeed, got error: %v", err)
+	}
+
+	metrics.assertCapture(t, 0, "success")
+}
+
+func TestServiceRecordsCaptureFailureMetrics(t *testing.T) {
+	metrics := &fakeMetricsRecorder{}
+	fixture := newFixtureWithMetrics(t, metrics)
+
+	_, err := fixture.service.CapturePayment(context.Background(), payment.CapturePaymentInput{
+		PaymentID: "missing",
+	})
+	if !errors.Is(err, payment.ErrPaymentNotFound) {
+		t.Fatalf("expected ErrPaymentNotFound, got %v", err)
+	}
+
+	metrics.assertCapture(t, 0, "payment_not_found")
 }
 
 func TestServiceRejectsMissingPaymentOnCapture(t *testing.T) {
@@ -389,6 +486,12 @@ type fixture struct {
 func newFixture(t *testing.T) fixture {
 	t.Helper()
 
+	return newFixtureWithMetrics(t, nil)
+}
+
+func newFixtureWithMetrics(t *testing.T, metrics payment.MetricsRecorder) fixture {
+	t.Helper()
+
 	ctx := context.Background()
 	merchants := merchantmemory.NewStore()
 	payers := payermemory.NewStore()
@@ -418,12 +521,13 @@ func newFixture(t *testing.T) fixture {
 		payers:    payers,
 		payments:  payments,
 		outbox:    outboxStore,
-		service: payment.NewServiceWithTransactorAndOutbox(
+		service: payment.NewServiceWithTransactorOutboxAndMetrics(
 			merchants,
 			payers,
 			payments,
 			db.NoopTransactor{},
 			outboxStore,
+			metrics,
 		),
 	}
 }
@@ -512,4 +616,73 @@ func decodePayload(t *testing.T, event outbox.Event, target any) {
 
 func testNow() time.Time {
 	return time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+}
+
+type fakeMetricsRecorder struct {
+	authorizations        []fakePaymentMetric
+	captures              []fakePaymentMetric
+	payerVersionConflicts int
+}
+
+type fakePaymentMetric struct {
+	result   string
+	duration time.Duration
+}
+
+func (m *fakeMetricsRecorder) ObserveAuthorization(result string, duration time.Duration) {
+	m.authorizations = append(m.authorizations, fakePaymentMetric{
+		result:   result,
+		duration: duration,
+	})
+}
+
+func (m *fakeMetricsRecorder) ObserveCapture(result string, duration time.Duration) {
+	m.captures = append(m.captures, fakePaymentMetric{
+		result:   result,
+		duration: duration,
+	})
+}
+
+func (m *fakeMetricsRecorder) ObservePayerVersionConflict() {
+	m.payerVersionConflicts++
+}
+
+func (m *fakeMetricsRecorder) assertAuthorization(t *testing.T, index int, result string) {
+	t.Helper()
+
+	if len(m.authorizations) <= index {
+		t.Fatalf("expected authorization metric at index %d, got %d metrics", index, len(m.authorizations))
+	}
+
+	if m.authorizations[index].result != result {
+		t.Fatalf("expected authorization metric result %q, got %q", result, m.authorizations[index].result)
+	}
+
+	if m.authorizations[index].duration < 0 {
+		t.Fatalf("expected non-negative authorization duration, got %s", m.authorizations[index].duration)
+	}
+}
+
+func (m *fakeMetricsRecorder) assertCapture(t *testing.T, index int, result string) {
+	t.Helper()
+
+	if len(m.captures) <= index {
+		t.Fatalf("expected capture metric at index %d, got %d metrics", index, len(m.captures))
+	}
+
+	if m.captures[index].result != result {
+		t.Fatalf("expected capture metric result %q, got %q", result, m.captures[index].result)
+	}
+
+	if m.captures[index].duration < 0 {
+		t.Fatalf("expected non-negative capture duration, got %s", m.captures[index].duration)
+	}
+}
+
+type conflictPayerRepository struct {
+	payer.PayerRepository
+}
+
+func (r *conflictPayerRepository) UpdatePayer(ctx context.Context, payerRecord payer.Payer) (payer.Payer, error) {
+	return payer.Payer{}, payer.ErrPayerVersionConflict
 }
