@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/fanryan/paycore/internal/merchant"
+	"github.com/fanryan/paycore/internal/shared/db"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -42,7 +43,7 @@ func (s *Store) CreateMerchant(ctx context.Context, merchantRecord merchant.Merc
 			updated_at
 	`
 
-	created, err := scanMerchant(s.pool.QueryRow(ctx, query,
+	created, err := scanMerchant(s.executor(ctx).QueryRow(ctx, query,
 		merchantRecord.ID,
 		merchantRecord.Name,
 		string(merchantRecord.Status),
@@ -74,7 +75,7 @@ func (s *Store) GetMerchant(ctx context.Context, merchantID string) (merchant.Me
 		WHERE id = $1
 	`
 
-	merchantRecord, err := scanMerchant(s.pool.QueryRow(ctx, query, merchantID))
+	merchantRecord, err := scanMerchant(s.executor(ctx).QueryRow(ctx, query, merchantID))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return merchant.Merchant{}, merchant.ErrMerchantNotFound
@@ -99,7 +100,7 @@ func (s *Store) ListMerchants(ctx context.Context) ([]merchant.Merchant, error) 
 		ORDER BY created_at ASC, id ASC
 	`
 
-	rows, err := s.pool.Query(ctx, query)
+	rows, err := s.executor(ctx).Query(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -153,4 +154,18 @@ func isUniqueViolation(err error) bool {
 	}
 
 	return pgErr.Code == uniqueViolationCode
+}
+
+type executor interface {
+	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+func (s *Store) executor(ctx context.Context) executor {
+	if tx, ok := db.TxFromContext(ctx); ok {
+		return tx
+	}
+
+	return s.pool
 }

@@ -70,7 +70,7 @@ Current development stage:
 - Central HTTP router migrated to chi for path parameters and feature route composition
 - Docker Compose local PostgreSQL, Redis, and Kafka infrastructure added
 - `.env.example` added for local runtime configuration
-- k6 payment happy-path load test added for merchant creation, payer creation, authorization, and capture
+- k6 payment happy-path and idempotency replay load tests added
 - HTTP API foundation and middleware tests added
 - Configuration tests added
 - Merchant and payer unit tests added
@@ -367,6 +367,12 @@ In another terminal:
 
 ```bash
 k6 run loadtest/payment_happy_path.js
+```
+
+To run the k6 idempotency replay load test:
+
+```bash
+k6 run loadtest/idempotency_replay.js
 ```
 
 ## Current Repository Structure

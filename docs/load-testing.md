@@ -7,11 +7,22 @@ This document explains the current PayCore load testing setup as it exists today
 ### Implemented
 
 - k6 payment happy-path script in `loadtest/payment_happy_path.js`.
-- The script exercises:
+- k6 idempotency replay script in `loadtest/idempotency_replay.js`.
+- k6 Redis rate-limit pressure script in `loadtest/rate_limit_pressure.js`.
+- k6 payer optimistic-lock contention script in `loadtest/payer_contention.js`.
+- k6 settlement/outbox backlog generator script in `loadtest/settlement_outbox_backlog.js`.
+- Shell runner for executing all load-test scenarios in `loadtest/run_all.sh`.
+- The happy-path script exercises:
   - `POST /merchants`
   - `POST /payers`
   - `POST /payments/authorize`
   - `POST /payments/{payment_id}/capture`
+- The idempotency replay script verifies:
+  - same `Idempotency-Key` plus same request body replays the original response
+  - same `Idempotency-Key` plus different request body returns `409 IDEMPOTENCY_KEY_CONFLICT`
+- The rate-limit pressure script verifies payment mutation requests can be rejected with `429 RATE_LIMIT_EXCEEDED`.
+- The payer contention script verifies concurrent balance mutations can return stable `409 PAYER_VERSION_CONFLICT` responses.
+- The settlement/outbox backlog script generates captured payments and outbox events for worker backlog observation.
 - Payment mutation requests include unique `Idempotency-Key` headers.
 - Unique merchant, payer, authorization key, and capture key values are generated per virtual user iteration.
 - The script supports configurable base URL, virtual users, and duration through environment variables.
@@ -20,10 +31,6 @@ This document explains the current PayCore load testing setup as it exists today
 
 - Automated CI load-test stage.
 - Docker Compose k6 service.
-- Rate-limit pressure scenario.
-- Duplicate idempotency replay scenario.
-- Payer optimistic-lock contention scenario.
-- Settlement/outbox backlog scenario.
 
 ### Public Endpoints
 
@@ -76,6 +83,18 @@ Run the happy-path load test:
 k6 run loadtest/payment_happy_path.js
 ```
 
+Run the idempotency replay load test:
+
+```bash
+k6 run loadtest/idempotency_replay.js
+```
+
+Run all load-test scenarios:
+
+```bash
+bash loadtest/run_all.sh
+```
+
 Override load shape:
 
 ```bash
@@ -96,6 +115,11 @@ PAYCORE_BASE_URL=http://localhost:8080 k6 run loadtest/payment_happy_path.js
 loadtest/
   |
   +--> payment_happy_path.js
+  +--> idempotency_replay.js
+  +--> rate_limit_pressure.js
+  +--> payer_contention.js
+  +--> settlement_outbox_backlog.js
+  +--> run_all.sh
 
 internal/http
   |
@@ -152,7 +176,48 @@ The script checks expected HTTP statuses:
 
 If authorization fails, the iteration skips capture because no valid `payment_id` exists.
 
-## 4. Metrics To Watch
+## 4. Idempotency Replay Flow
+
+### Request Flow
+
+Each k6 iteration:
+
+1. Creates a unique merchant.
+2. Creates a unique payer with `10000` minor units.
+3. Authorizes a `4000` minor-unit payment with a unique `Idempotency-Key`.
+4. Repeats the same authorization request with the same key and expects the same `payment_id`.
+5. Reuses the same key with a different amount and expects `409 IDEMPOTENCY_KEY_CONFLICT`.
+
+### Diagram
+
+```text
+k6 virtual user
+  |
+  +--> POST /merchants
+  |
+  +--> POST /payers
+  |
+  +--> POST /payments/authorize
+  |      +--> Idempotency-Key: key-1
+  |      +--> amount: 4000
+  |      +--> 201 Created
+  |
+  +--> POST /payments/authorize
+  |      +--> Idempotency-Key: key-1
+  |      +--> amount: 4000
+  |      +--> 201 Created replay with same payment_id
+  |
+  +--> POST /payments/authorize
+         +--> Idempotency-Key: key-1
+         +--> amount: 5000
+         +--> 409 IDEMPOTENCY_KEY_CONFLICT
+```
+
+### Failure Path
+
+If the initial authorization fails, the iteration skips replay and conflict checks because there is no valid original response to compare against.
+
+## 5. Metrics To Watch
 
 Prometheus is available locally at:
 
@@ -186,7 +251,7 @@ paycore_settlement_batch_total
 paycore_settlement_payments_total
 ```
 
-## 5. Initial Baseline Result
+## 6. Initial Baseline Result
 
 This baseline was captured from the current `payment_happy_path.js` script with:
 
@@ -240,6 +305,20 @@ The current p95 was well below the script threshold of `500 ms`.
 
 This should be treated as an early local baseline, not a production capacity claim. The test currently creates fresh merchants and payers every iteration, so it measures end-to-end happy-path API behavior more than pure payment authorization throughput.
 
+## 7. Load Test Suite Result
+
+This suite result was captured by running the current load-test scripts as a group.
+
+| Scenario | VUs | Completed Iterations | Throughput | HTTP Error Rate | Checks Succeeded | p95 Latency |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `payment_happy_path.js` | 5 | 25 | 18.86 reqs/sec | 0.00% | 100.00% (150/150) | 38.84 ms |
+| `idempotency_replay.js` | 3 | 15 | 14.45 reqs/sec | 20.00% | 100.00% (120/120) | 16.50 ms |
+| `rate_limit_pressure.js` | 10 | 454 | 89.30 reqs/sec | 57.23% | 100.00% (908/908) | 20.35 ms |
+| `payer_contention.js` | 20 | 1,699 | 335.98 reqs/sec | 60.96% | 100.00% (3400/3400) | 18.85 ms |
+| `settlement_outbox_backlog.js` | 10 | 386 | 302.95 reqs/sec | 0.00% | 100.00% (2316/2316) | 26.61 ms |
+
+The higher HTTP error rates in `idempotency_replay.js`, `rate_limit_pressure.js`, and `payer_contention.js` are expected. Those scenarios intentionally produce `409` and `429` responses to verify idempotency conflict handling, Redis rate limiting, and payer optimistic-lock conflict behavior. The important signal is that every scenario-specific check passed.
+
 ## Validation And Errors
 
 The first happy-path test is intentionally simple:
@@ -249,7 +328,13 @@ The first happy-path test is intentionally simple:
 - It avoids intentionally reusing idempotency keys.
 - It treats failed HTTP checks as load-test failures.
 
-Later scenarios should deliberately test duplicate idempotency replay, conflicting idempotency keys, Redis rate-limit rejection, and payer balance contention.
+Later scenarios should deliberately test Redis rate-limit rejection and payer balance contention.
+
+Some scenarios intentionally produce HTTP `409` or `429` responses:
+
+- `idempotency_replay.js` expects one `409 IDEMPOTENCY_KEY_CONFLICT` per successful iteration, so its `http_req_failed` threshold allows the expected conflict rate.
+- `payer_contention.js` intentionally drives concurrent updates against one payer, so it does not use an `http_req_failed` threshold. The scenario checks that conflicts return the stable `PAYER_VERSION_CONFLICT` error code instead.
+- `rate_limit_pressure.js` intentionally allows `429 RATE_LIMIT_EXCEEDED` responses.
 
 ## Persistence
 
@@ -280,9 +365,20 @@ Run the load test manually:
 k6 run loadtest/payment_happy_path.js
 ```
 
+Run the idempotency replay scenario manually:
+
+```bash
+k6 run loadtest/idempotency_replay.js
+```
+
 ## File Guide
 
 - `loadtest/payment_happy_path.js` owns the first k6 scenario.
+- `loadtest/idempotency_replay.js` owns the idempotency replay and conflict scenario.
+- `loadtest/rate_limit_pressure.js` owns the Redis rate-limit pressure scenario.
+- `loadtest/payer_contention.js` owns the optimistic-lock contention scenario.
+- `loadtest/settlement_outbox_backlog.js` owns the captured-payment backlog generation scenario.
+- `loadtest/run_all.sh` runs the load-test scripts sequentially through the k6 Docker image.
 - `docs/load-testing.md` explains setup, runtime flow, metrics, and planned scenarios.
 - `internal/shared/metrics/metrics.go` owns Prometheus collectors used to inspect the run.
 - `prometheus.yml` owns local scrape targets.
@@ -293,7 +389,7 @@ k6 run loadtest/payment_happy_path.js
 - [x] Add payment happy-path load test.
 - [x] Document local load-test commands.
 - [x] Add initial 5 VU / 30 second baseline result.
-- [ ] Add duplicate idempotency replay scenario.
-- [ ] Add Redis rate-limit pressure scenario.
-- [ ] Add payer optimistic-lock contention scenario.
-- [ ] Add settlement/outbox backlog scenario.
+- [x] Add duplicate idempotency replay scenario.
+- [x] Add Redis rate-limit pressure scenario.
+- [x] Add payer optimistic-lock contention scenario.
+- [x] Add settlement/outbox backlog scenario.
