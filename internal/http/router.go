@@ -60,7 +60,12 @@ func NewRouter(config RouterConfig) http.Handler {
 	if config.PaymentHandler != nil {
 		router.Route("/payments", func(r chi.Router) {
 			if config.RateLimiter != nil {
-				r.Use(rateLimitMiddleware(config.RateLimiter))
+				var rateLimitMetrics rateLimitMetricsRecorder
+				if config.Metrics != nil {
+					rateLimitMetrics = config.Metrics
+				}
+
+				r.Use(rateLimitMiddleware(config.RateLimiter, rateLimitMetrics))
 			}
 
 			r.Post("/authorize", config.PaymentHandler.ServeHTTP)

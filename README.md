@@ -59,6 +59,7 @@ Current development stage:
 - One-shot settlement worker implemented for previous-window batch creation
 - Settlement stale batch recovery implemented by resuming expired `PROCESSING` batches before new work
 - Prometheus metrics foundation implemented for API HTTP requests, settlement batches, settlement recovery, and outbox publishing
+- Rate-limit metrics implemented for allowed, rejected, Redis error, and check duration paths
 - API exposes `GET /metrics`; outbox and settlement workers expose `/metrics` on `PAYCORE_METRICS_ADDR`
 - Shared currency normalization and validation implemented
 - Shared random id helper implemented
@@ -172,7 +173,7 @@ Run one settlement batch for the previous completed window:
 
 ```bash
 PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=disable' \
-PAYCORE_METRICS_ADDR=:9092 \
+PAYCORE_METRICS_ADDR=:9093 \
 go run ./cmd/paycore-settlement-worker
 ```
 
@@ -181,7 +182,7 @@ Override the settlement window:
 ```bash
 PAYCORE_SETTLEMENT_WINDOW_MINUTES=30 \
 PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=disable' \
-PAYCORE_METRICS_ADDR=:9092 \
+PAYCORE_METRICS_ADDR=:9093 \
 go run ./cmd/paycore-settlement-worker
 ```
 
@@ -231,7 +232,7 @@ Worker metrics are exposed on `PAYCORE_METRICS_ADDR`:
 
 ```bash
 curl http://localhost:9091/metrics
-curl http://localhost:9092/metrics
+curl http://localhost:9093/metrics
 ```
 
 Prometheus runs on port `9090` when started through Docker Compose:
@@ -247,7 +248,7 @@ The default `prometheus.yml` scrapes host-run PayCore processes at:
 ```text
 host.docker.internal:8080  # API
 host.docker.internal:9091  # outbox worker
-host.docker.internal:9092  # settlement worker
+host.docker.internal:9093  # settlement worker
 ```
 
 Create local in-memory records:

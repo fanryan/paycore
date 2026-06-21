@@ -149,16 +149,23 @@ func metricsMiddleware(recorder *metrics.Metrics) func(http.Handler) http.Handle
 	}
 }
 
-func rateLimitMiddleware(limiter ratelimit.Limiter) func(http.Handler) http.Handler {
+type rateLimitMetricsRecorder interface {
+	ObserveRateLimit(result string, duration time.Duration)
+}
+
+func rateLimitMiddleware(limiter ratelimit.Limiter, metricsRecorder rateLimitMetricsRecorder) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			startedAt := time.Now()
 			result, err := limiter.Allow(r.Context(), rateLimitKey(r))
 			if err != nil {
 				if errors.Is(err, ratelimit.ErrLimiterUnavailable) {
+					observeRateLimit(metricsRecorder, "redis_error", time.Since(startedAt))
 					writeError(w, r, http.StatusServiceUnavailable, "RATE_LIMITER_UNAVAILABLE", "Rate limiter unavailable")
 					return
 				}
 
+				observeRateLimit(metricsRecorder, "error", time.Since(startedAt))
 				writeError(w, r, http.StatusInternalServerError, "RATE_LIMIT_ERROR", "Rate limit check failed")
 				return
 			}
@@ -173,13 +180,23 @@ func rateLimitMiddleware(limiter ratelimit.Limiter) func(http.Handler) http.Hand
 					w.Header().Set("Retry-After", strconv.FormatInt(int64(result.RetryAfter.Seconds()), 10))
 				}
 
+				observeRateLimit(metricsRecorder, "rejected", time.Since(startedAt))
 				writeError(w, r, http.StatusTooManyRequests, "RATE_LIMIT_EXCEEDED", "Rate limit exceeded")
 				return
 			}
 
+			observeRateLimit(metricsRecorder, "allowed", time.Since(startedAt))
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+func observeRateLimit(recorder rateLimitMetricsRecorder, result string, duration time.Duration) {
+	if recorder == nil {
+		return
+	}
+
+	recorder.ObserveRateLimit(result, duration)
 }
 
 func routePattern(r *http.Request) string {

@@ -27,6 +27,11 @@ This document explains the current PayCore Prometheus metrics implementation as 
   - `paycore_outbox_publish_attempts_total{publisher}`
   - `paycore_outbox_publish_failures_total{publisher}`
   - `paycore_outbox_events_published_total{publisher}`
+- Rate-limit metrics:
+  - `paycore_rate_limit_allowed_total`
+  - `paycore_rate_limit_rejected_total`
+  - `paycore_rate_limit_redis_errors_total`
+  - `paycore_rate_limit_check_duration_seconds{result}`
 - Go runtime and process collectors:
   - Go runtime metrics
   - process metrics
@@ -41,7 +46,6 @@ This document explains the current PayCore Prometheus metrics implementation as 
 ### Not Implemented Yet
 
 - Grafana dashboards.
-- Redis rate-limit metrics.
 - Redis idempotency cache metrics.
 - Outbox pending-event gauge.
 - Outbox publish lag gauge.
@@ -111,7 +115,7 @@ PAYCORE_METRICS_ADDR=:9091 go run ./cmd/paycore-outbox-worker
 Settlement worker command:
 
 ```bash
-PAYCORE_METRICS_ADDR=:9092 go run ./cmd/paycore-settlement-worker
+PAYCORE_METRICS_ADDR=:9093 go run ./cmd/paycore-settlement-worker
 ```
 
 Prometheus command:
@@ -135,7 +139,7 @@ Current Prometheus scrape targets assume the API and workers run on the host mac
 ```text
 host.docker.internal:8080
 host.docker.internal:9091
-host.docker.internal:9092
+host.docker.internal:9093
 ```
 
 ### Feature Package Boundary
@@ -228,6 +232,7 @@ Metric labels are intentionally low-cardinality:
 - HTTP route labels use chi route patterns, not raw request paths.
 - Outbox labels use publisher backend names such as `logging` or `kafka`.
 - Settlement labels use stable batch statuses.
+- Rate-limit labels use stable result values such as `allowed`, `rejected`, and `redis_error`.
 
 Do not add labels for raw IDs, idempotency keys, payer IDs, merchant IDs, payment IDs, request IDs, or error strings.
 
@@ -306,7 +311,7 @@ Defines local scrape targets for host-run PayCore processes.
 - [x] Expose worker `/metrics` endpoints.
 - [x] Add Prometheus to Docker Compose.
 - [x] Add scrape configuration.
-- [ ] Add Redis rate-limit metrics.
+- [x] Add Redis rate-limit metrics.
 - [ ] Add Redis idempotency cache metrics.
 - [ ] Add outbox lag metrics.
 - [ ] Add dashboards or dashboard screenshots.

@@ -22,6 +22,10 @@ type Metrics struct {
 	outboxPublishAttemptsTotal      *prometheus.CounterVec
 	outboxPublishFailuresTotal      *prometheus.CounterVec
 	outboxEventsPublishedTotal      *prometheus.CounterVec
+	rateLimitAllowedTotal           prometheus.Counter
+	rateLimitRejectedTotal          prometheus.Counter
+	rateLimitRedisErrorsTotal       prometheus.Counter
+	rateLimitCheckDuration          *prometheus.HistogramVec
 }
 
 func New() *Metrics {
@@ -96,6 +100,32 @@ func New() *Metrics {
 		},
 		[]string{"publisher"},
 	)
+	rateLimitAllowedTotal := prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "paycore_rate_limit_allowed_total",
+			Help: "Total rate-limit checks that allowed a request.",
+		},
+	)
+	rateLimitRejectedTotal := prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "paycore_rate_limit_rejected_total",
+			Help: "Total rate-limit checks that rejected a request.",
+		},
+	)
+	rateLimitRedisErrorsTotal := prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "paycore_rate_limit_redis_errors_total",
+			Help: "Total Redis-backed rate-limit errors.",
+		},
+	)
+	rateLimitCheckDuration := prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "paycore_rate_limit_check_duration_seconds",
+			Help:    "Rate-limit check duration in seconds.",
+			Buckets: prometheus.DefBuckets,
+		},
+		[]string{"result"},
+	)
 
 	registry.MustRegister(
 		collectors.NewGoCollector(),
@@ -110,6 +140,10 @@ func New() *Metrics {
 		outboxPublishAttemptsTotal,
 		outboxPublishFailuresTotal,
 		outboxEventsPublishedTotal,
+		rateLimitAllowedTotal,
+		rateLimitRejectedTotal,
+		rateLimitRedisErrorsTotal,
+		rateLimitCheckDuration,
 	)
 
 	return &Metrics{
@@ -124,6 +158,10 @@ func New() *Metrics {
 		outboxPublishAttemptsTotal:      outboxPublishAttemptsTotal,
 		outboxPublishFailuresTotal:      outboxPublishFailuresTotal,
 		outboxEventsPublishedTotal:      outboxEventsPublishedTotal,
+		rateLimitAllowedTotal:           rateLimitAllowedTotal,
+		rateLimitRejectedTotal:          rateLimitRejectedTotal,
+		rateLimitRedisErrorsTotal:       rateLimitRedisErrorsTotal,
+		rateLimitCheckDuration:          rateLimitCheckDuration,
 	}
 }
 
@@ -172,4 +210,17 @@ func (m *Metrics) ObserveOutboxBatch(publisher string, claimed int, published in
 	if failed > 0 {
 		m.outboxPublishFailuresTotal.WithLabelValues(publisher).Add(float64(failed))
 	}
+}
+
+func (m *Metrics) ObserveRateLimit(result string, duration time.Duration) {
+	switch result {
+	case "allowed":
+		m.rateLimitAllowedTotal.Inc()
+	case "rejected":
+		m.rateLimitRejectedTotal.Inc()
+	case "redis_error":
+		m.rateLimitRedisErrorsTotal.Inc()
+	}
+
+	m.rateLimitCheckDuration.WithLabelValues(result).Observe(duration.Seconds())
 }

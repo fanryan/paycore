@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"errors"
 	"io"
 	"log/slog"
@@ -8,6 +9,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/fanryan/paycore/internal/ratelimit"
 )
 
 func TestRecoveryMiddlewareReturnsStructuredError(t *testing.T) {
@@ -105,4 +109,106 @@ func TestBodyLimitMiddlewareAllowsRequestWithinLimit(t *testing.T) {
 	if response.Code != http.StatusNoContent {
 		t.Fatalf("expected status %d, got %d", http.StatusNoContent, response.Code)
 	}
+}
+
+func TestRateLimitMiddlewareRecordsAllowedMetric(t *testing.T) {
+	metrics := &fakeRateLimitMetricsRecorder{}
+	handler := rateLimitMiddleware(
+		fakeLimiter{
+			result: ratelimit.Result{Allowed: true, Limit: 10, Remaining: 9},
+		},
+		metrics,
+	)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	request := httptest.NewRequest(http.MethodPost, "/payments/authorize", nil)
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("expected status %d, got %d", http.StatusNoContent, response.Code)
+	}
+
+	if metrics.results["allowed"] != 1 {
+		t.Fatalf("expected allowed metric 1, got %d", metrics.results["allowed"])
+	}
+}
+
+func TestRateLimitMiddlewareRecordsRejectedMetric(t *testing.T) {
+	metrics := &fakeRateLimitMetricsRecorder{}
+	handler := rateLimitMiddleware(
+		fakeLimiter{
+			result: ratelimit.Result{Allowed: false, Limit: 10, Remaining: 0, RetryAfter: time.Minute},
+		},
+		metrics,
+	)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("next handler should not run")
+	}))
+
+	request := httptest.NewRequest(http.MethodPost, "/payments/authorize", nil)
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected status %d, got %d", http.StatusTooManyRequests, response.Code)
+	}
+
+	if metrics.results["rejected"] != 1 {
+		t.Fatalf("expected rejected metric 1, got %d", metrics.results["rejected"])
+	}
+}
+
+func TestRateLimitMiddlewareRecordsRedisErrorMetric(t *testing.T) {
+	metrics := &fakeRateLimitMetricsRecorder{}
+	handler := rateLimitMiddleware(
+		fakeLimiter{err: ratelimit.ErrLimiterUnavailable},
+		metrics,
+	)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("next handler should not run")
+	}))
+
+	request := httptest.NewRequest(http.MethodPost, "/payments/authorize", nil)
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected status %d, got %d", http.StatusServiceUnavailable, response.Code)
+	}
+
+	if metrics.results["redis_error"] != 1 {
+		t.Fatalf("expected redis_error metric 1, got %d", metrics.results["redis_error"])
+	}
+}
+
+type fakeLimiter struct {
+	result ratelimit.Result
+	err    error
+}
+
+func (l fakeLimiter) Allow(ctx context.Context, key string) (ratelimit.Result, error) {
+	if err := ctx.Err(); err != nil {
+		return ratelimit.Result{}, err
+	}
+
+	if l.err != nil {
+		return ratelimit.Result{}, l.err
+	}
+
+	return l.result, nil
+}
+
+type fakeRateLimitMetricsRecorder struct {
+	results map[string]int
+}
+
+func (r *fakeRateLimitMetricsRecorder) ObserveRateLimit(result string, duration time.Duration) {
+	if r.results == nil {
+		r.results = map[string]int{}
+	}
+
+	r.results[result]++
 }

@@ -85,7 +85,7 @@ The current app processes run on the host, while Prometheus runs in Docker Compo
 ```text
 host.docker.internal:8080  # PayCore API
 host.docker.internal:9091  # Outbox worker metrics
-host.docker.internal:9092  # Settlement worker metrics
+host.docker.internal:9093  # Settlement worker metrics
 ```
 
 Prometheus UI:
