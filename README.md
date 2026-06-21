@@ -37,6 +37,72 @@ PayCore currently includes:
 
 Detailed implementation notes live in `docs/`. Start with `docs/architecture.md`, `docs/architecture-tradeoffs.md`, `docs/payment.md`, `docs/failure-modes.md`, and `docs/performance-results.md`.
 
+## Target Architecture
+
+```text
+Client
+  |
+  v
+PayCore API Service
+  |
+  |-- Request Validation
+  |-- Request ID Middleware
+  |-- Redis Rate Limiter
+  |-- Redis Idempotency Cache
+  |-- Merchant APIs
+  |-- Payer APIs
+  |-- Payment Authorization
+  |-- Payment Capture
+  |-- Settlement APIs
+  |-- Prometheus Metrics
+  |
+  +--> Redis
+  |      |-- Rate Limiting
+  |      |-- Idempotency Response Cache
+  |
+  v
+PostgreSQL
+  |
+  |-- Durable Payment State
+  |-- Durable Payer Balances
+  |-- Durable Idempotency Records
+  |-- Durable Settlement Records
+  |-- Durable Outbox Events
+  |
+  +--> Outbox Publisher
+          |
+          v
+        Kafka
+          |
+          v
+      LedgerFlow
+```
+
+## Repository Map
+
+```text
+paycore/
+  cmd/
+    paycore-api/                # HTTP API
+    paycore-migrate/            # PostgreSQL migrations
+    paycore-outbox-worker/      # Outbox publisher
+    paycore-expiry-worker/      # Authorization expiry
+    paycore-settlement-worker/  # Settlement batches
+  internal/
+    http/                       # Router and middleware
+    merchant/                   # Merchant feature
+    payer/                      # Payer balances
+    payment/                    # Authorization, capture, expiry
+    idempotency/                # Durable request replay
+    outbox/                     # Transactional event publishing
+    settlement/                 # Settlement batches and recovery
+    ratelimit/                  # Redis admission control
+    shared/                     # Config, db, metrics, helpers
+  loadtest/                     # k6 scenarios
+  migrations/                   # PostgreSQL schema
+  docs/                         # Architecture and feature docs
+```
+
 ## API Endpoints
 
 ```text
@@ -168,32 +234,6 @@ Override the address:
 ```bash
 PAYCORE_HTTP_ADDR=:9090 go run ./cmd/paycore-api
 ```
-
-Supported local configuration:
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `PAYCORE_ENV` | `local` | Runtime environment label used in startup logs |
-| `PAYCORE_HTTP_ADDR` | `:8080` | HTTP listen address |
-| `PAYCORE_METRICS_ADDR` | `:9091` | Metrics listen address used by worker commands |
-| `PAYCORE_HTTP_READ_HEADER_TIMEOUT_SECONDS` | `5` | HTTP read header timeout in seconds |
-| `PAYCORE_HTTP_SHUTDOWN_TIMEOUT_SECONDS` | `10` | Graceful shutdown timeout in seconds |
-| `PAYCORE_REPOSITORY_BACKEND` | `memory` | Repository backend: `memory` or `postgres` |
-| `PAYCORE_DATABASE_URL` | empty | PostgreSQL connection string for migrations and repository adapters |
-| `PAYCORE_REDIS_ADDR` | `localhost:6379` | Redis address used by rate limiting and idempotency cache adapters |
-| `PAYCORE_KAFKA_BROKERS` | `localhost:9092` | Kafka broker list used by the outbox publisher adapter |
-| `PAYCORE_KAFKA_OUTBOX_TOPIC` | `paycore.outbox.events` | Kafka topic used by the outbox publisher adapter |
-| `PAYCORE_OUTBOX_PUBLISHER` | `logging` | Outbox publisher backend: `logging` or `kafka` |
-| `PAYCORE_RATE_LIMIT_ENABLED` | `false` | Enables Redis-backed rate limiting for payment mutation routes |
-| `PAYCORE_RATE_LIMIT_REQUESTS` | `60` | Fixed-window request limit per client key |
-| `PAYCORE_RATE_LIMIT_WINDOW_SECONDS` | `60` | Fixed-window length in seconds |
-| `PAYCORE_IDEMPOTENCY_CACHE_ENABLED` | `false` | Enables Redis-backed idempotency response cache |
-| `PAYCORE_IDEMPOTENCY_CACHE_TTL_SECONDS` | `86400` | Redis idempotency response cache TTL in seconds |
-| `PAYCORE_EXPIRY_LIMIT` | `100` | Maximum expired authorized payments processed per expiry worker run |
-| `PAYCORE_SETTLEMENT_WORKER_ID` | `paycore-settlement-worker` | Worker id recorded on processing settlement batches |
-| `PAYCORE_SETTLEMENT_WINDOW_MINUTES` | `60` | Previous completed window size processed by settlement worker |
-| `PAYCORE_SETTLEMENT_CLAIM_LIMIT` | `100` | Maximum captured payments claimed per settlement batch |
-| `PAYCORE_SETTLEMENT_LOCK_MINUTES` | `5` | Processing lock TTL for settlement batch ownership |
 
 Test the current endpoints:
 
@@ -346,80 +386,57 @@ To run the k6 idempotency replay load test:
 k6 run loadtest/idempotency_replay.js
 ```
 
-## Repository Map
+## Implementation Sequence
 
-```text
-paycore/
-  cmd/
-    paycore-api/                # HTTP API
-    paycore-migrate/            # PostgreSQL migrations
-    paycore-outbox-worker/      # Outbox publisher
-    paycore-expiry-worker/      # Authorization expiry
-    paycore-settlement-worker/  # Settlement batches
-  internal/
-    http/                       # Router and middleware
-    merchant/                   # Merchant feature
-    payer/                      # Payer balances
-    payment/                    # Authorization, capture, expiry
-    idempotency/                # Durable request replay
-    outbox/                     # Transactional event publishing
-    settlement/                 # Settlement batches and recovery
-    ratelimit/                  # Redis admission control
-    shared/                     # Config, db, metrics, helpers
-  loadtest/                     # k6 scenarios
-  migrations/                   # PostgreSQL schema
-  docs/                         # Architecture and feature docs
-```
+1. API foundation and configuration
+2. Merchant and payer domain models
+3. Merchant and payer APIs
+4. Payment authorization and holds
+5. Payment capture and state machine enforcement
+6. Durable idempotency records
+7. Redis-backed rate limiting
+8. Redis-backed idempotency response caching
+9. PostgreSQL persistence
+10. Transactional outbox
+11. Kafka publishing
+12. Settlement batch processing
+13. Prometheus metrics
+14. Docker Compose local infrastructure
+15. Load testing and performance documentation
 
-## Target Architecture
+## Documentation
 
-```text
-Client
-  |
-  v
-PayCore API Service
-  |
-  |-- Request Validation
-  |-- Request ID Middleware
-  |-- Redis Rate Limiter
-  |-- Redis Idempotency Cache
-  |-- Merchant APIs
-  |-- Payer APIs
-  |-- Payment Authorization
-  |-- Payment Capture
-  |-- Settlement APIs
-  |-- Prometheus Metrics
-  |
-  +--> Redis
-  |      |-- Rate Limiting
-  |      |-- Idempotency Response Cache
-  |
-  v
-PostgreSQL
-  |
-  |-- Durable Payment State
-  |-- Durable Payer Balances
-  |-- Durable Idempotency Records
-  |-- Durable Settlement Records
-  |-- Durable Outbox Events
-  |
-  +--> Outbox Publisher
-          |
-          v
-        Kafka
-          |
-          v
-      LedgerFlow
-```
+Current documentation:
 
-## Payment Lifecycle
+- `docs/architecture.md`
+- `docs/architecture-tradeoffs.md`
+- `docs/failure-modes.md`
+- `docs/idempotency.md`
+- `docs/load-testing.md`
+- `docs/local-infrastructure.md`
+- `docs/merchant.md`
+- `docs/metrics.md`
+- `docs/outbox.md`
+- `docs/payer.md`
+- `docs/payment.md`
+- `docs/performance-results.md`
+- `docs/postgresql-migrations.md`
+- `docs/rate-limiting.md`
+- `docs/settlement.md`
 
-```mermaid
-stateDiagram-v2
-    [*] --> PENDING
-    PENDING --> AUTHORIZED
-    PENDING --> FAILED
-    AUTHORIZED --> CAPTURED
-    AUTHORIZED --> EXPIRED
-    CAPTURED --> SETTLED
-```
+Planned documentation:
+
+- `docs/payment-lifecycle.md`
+
+## Known Limitations And Next Hardening
+
+PayCore intentionally stops short of real payment rails, card networks, bank integrations, and production authentication.
+
+Important next hardening areas:
+
+- Move durable idempotency completion into the same PostgreSQL transaction as payment mutation and outbox writes.
+- Add authentication and authorization around operational endpoints.
+- Add Grafana dashboards and alert rules for outbox lag, Redis errors, payer conflict spikes, and API latency.
+- Add longer soak tests and repeatable benchmark reset tooling.
+- Add deployment manifests if moving beyond local Docker Compose.
+- Add explicit payment read APIs such as `GET /payments/{payment_id}`.
