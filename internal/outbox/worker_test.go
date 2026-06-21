@@ -61,7 +61,7 @@ func TestWorkerRecordsOutboxMetricsForPublishedEvents(t *testing.T) {
 	metrics := &fakeMetricsRecorder{}
 	worker := newTestWorkerWithMetrics(t, store, publisher, metrics)
 
-	createEvent(t, store, "payment-1", "payment.authorized")
+	createEventAt(t, store, "payment-1", "payment.authorized", testNow().Add(-time.Minute))
 
 	result, err := worker.ProcessBatch(ctx)
 	if err != nil {
@@ -83,6 +83,14 @@ func TestWorkerRecordsOutboxMetricsForPublishedEvents(t *testing.T) {
 
 	if batch.claimed != 1 || batch.published != 1 || batch.failed != 0 {
 		t.Fatalf("unexpected metric batch: %+v", batch)
+	}
+
+	if metrics.pendingEvents != 1 {
+		t.Fatalf("expected pending events metric 1 before claim, got %d", metrics.pendingEvents)
+	}
+
+	if metrics.publishLag <= 0 {
+		t.Fatalf("expected positive publish lag, got %s", metrics.publishLag)
 	}
 }
 
@@ -232,12 +240,18 @@ func newTestWorkerWithMetrics(t *testing.T, repository outbox.Repository, publis
 func createEvent(t *testing.T, store *outboxmemory.Store, aggregateID string, eventType string) outbox.Event {
 	t.Helper()
 
+	return createEventAt(t, store, aggregateID, eventType, testNow())
+}
+
+func createEventAt(t *testing.T, store *outboxmemory.Store, aggregateID string, eventType string, now time.Time) outbox.Event {
+	t.Helper()
+
 	event, err := outbox.NewEvent(outbox.NewEventInput{
 		AggregateType: "payment",
 		AggregateID:   aggregateID,
 		EventType:     eventType,
 		Payload:       map[string]any{"payment_id": aggregateID},
-		Now:           testNow(),
+		Now:           now,
 	})
 	if err != nil {
 		t.Fatalf("expected event create to succeed, got error: %v", err)
@@ -289,7 +303,9 @@ func (p *fakePublisher) Publish(ctx context.Context, event outbox.Event) error {
 }
 
 type fakeMetricsRecorder struct {
-	batches []fakeOutboxBatchMetric
+	batches       []fakeOutboxBatchMetric
+	pendingEvents int
+	publishLag    time.Duration
 }
 
 type fakeOutboxBatchMetric struct {
@@ -306,6 +322,11 @@ func (r *fakeMetricsRecorder) ObserveOutboxBatch(publisher string, claimed int, 
 		published: published,
 		failed:    failed,
 	})
+}
+
+func (r *fakeMetricsRecorder) ObserveOutboxStats(pendingEvents int, publishLag time.Duration) {
+	r.pendingEvents = pendingEvents
+	r.publishLag = publishLag
 }
 
 func testNow() time.Time {

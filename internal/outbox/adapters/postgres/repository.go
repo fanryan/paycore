@@ -248,6 +248,40 @@ func (s *Store) MarkEventFailed(ctx context.Context, input outbox.MarkEventFaile
 	return failed, nil
 }
 
+func (s *Store) Stats(ctx context.Context, input outbox.StatsInput) (outbox.Stats, error) {
+	now := input.Now.UTC()
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+
+	const query = `
+		SELECT
+			COUNT(*),
+			MIN(available_at)
+		FROM outbox_events
+		WHERE status IN ('PENDING', 'FAILED')
+		AND available_at <= $1
+	`
+
+	var pendingEvents int
+	var oldestAvailable pgtype.Timestamptz
+	if err := s.queryRow(ctx, query, now).Scan(&pendingEvents, &oldestAvailable); err != nil {
+		return outbox.Stats{}, err
+	}
+
+	stats := outbox.Stats{
+		PendingEvents: pendingEvents,
+	}
+	if oldestAvailable.Valid {
+		stats.PublishLag = now.Sub(oldestAvailable.Time)
+		if stats.PublishLag < 0 {
+			stats.PublishLag = 0
+		}
+	}
+
+	return stats, nil
+}
+
 func (s *Store) queryRow(ctx context.Context, sql string, args ...any) pgx.Row {
 	if tx, ok := db.TxFromContext(ctx); ok {
 		return tx.QueryRow(ctx, sql, args...)

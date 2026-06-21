@@ -153,3 +153,47 @@ func (s *Store) ListEvents(ctx context.Context) ([]outbox.Event, error) {
 
 	return events, nil
 }
+
+func (s *Store) Stats(ctx context.Context, input outbox.StatsInput) (outbox.Stats, error) {
+	if err := ctx.Err(); err != nil {
+		return outbox.Stats{}, err
+	}
+
+	now := input.Now.UTC()
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var oldestAvailable *time.Time
+	pending := 0
+	for _, event := range s.events {
+		if event.Status != outbox.StatusPending && event.Status != outbox.StatusFailed {
+			continue
+		}
+
+		if event.AvailableAt.After(now) {
+			continue
+		}
+
+		pending++
+		availableAt := event.AvailableAt
+		if oldestAvailable == nil || availableAt.Before(*oldestAvailable) {
+			oldestAvailable = &availableAt
+		}
+	}
+
+	stats := outbox.Stats{
+		PendingEvents: pending,
+	}
+	if oldestAvailable != nil {
+		stats.PublishLag = now.Sub(*oldestAvailable)
+		if stats.PublishLag < 0 {
+			stats.PublishLag = 0
+		}
+	}
+
+	return stats, nil
+}

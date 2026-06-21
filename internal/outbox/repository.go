@@ -24,11 +24,21 @@ type MarkEventFailedInput struct {
 	Now           time.Time
 }
 
+type StatsInput struct {
+	Now time.Time
+}
+
+type Stats struct {
+	PendingEvents int
+	PublishLag    time.Duration
+}
+
 type Repository interface {
 	CreateEvent(ctx context.Context, event Event) (Event, error)
 	ClaimPendingEvents(ctx context.Context, input ClaimPendingEventsInput) ([]Event, error)
 	MarkEventPublished(ctx context.Context, eventID string, now time.Time) (Event, error)
 	MarkEventFailed(ctx context.Context, input MarkEventFailedInput) (Event, error)
+	Stats(ctx context.Context, input StatsInput) (Stats, error)
 }
 
 type NoopRepository struct{}
@@ -63,4 +73,12 @@ func (NoopRepository) MarkEventFailed(ctx context.Context, input MarkEventFailed
 	}
 
 	return Event{}, ErrEventNotFound
+}
+
+func (NoopRepository) Stats(ctx context.Context, input StatsInput) (Stats, error) {
+	if err := ctx.Err(); err != nil {
+		return Stats{}, err
+	}
+
+	return Stats{}, nil
 }

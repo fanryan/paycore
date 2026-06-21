@@ -38,6 +38,7 @@ type WorkerConfig struct {
 
 type MetricsRecorder interface {
 	ObserveOutboxBatch(publisher string, claimed int, published int, failed int)
+	ObserveOutboxStats(pendingEvents int, publishLag time.Duration)
 }
 
 type ProcessBatchResult struct {
@@ -90,7 +91,15 @@ func NewWorker(config WorkerConfig) (*Worker, error) {
 func (w *Worker) ProcessBatch(ctx context.Context) (ProcessBatchResult, error) {
 	var claimed []Event
 
-	err := w.transactor.WithinTx(ctx, func(ctx context.Context) error {
+	stats, err := w.repository.Stats(ctx, StatsInput{
+		Now: w.now().UTC(),
+	})
+	if err != nil {
+		return ProcessBatchResult{}, err
+	}
+	w.observeOutboxStats(stats)
+
+	err = w.transactor.WithinTx(ctx, func(ctx context.Context) error {
 		var err error
 		claimed, err = w.repository.ClaimPendingEvents(ctx, ClaimPendingEventsInput{
 			WorkerID: w.workerID,
@@ -134,6 +143,14 @@ func (w *Worker) ProcessBatch(ctx context.Context) (ProcessBatchResult, error) {
 	w.observeOutboxBatch(result)
 
 	return result, nil
+}
+
+func (w *Worker) observeOutboxStats(stats Stats) {
+	if w.metrics == nil {
+		return
+	}
+
+	w.metrics.ObserveOutboxStats(stats.PendingEvents, stats.PublishLag)
 }
 
 func (w *Worker) observeOutboxBatch(result ProcessBatchResult) {

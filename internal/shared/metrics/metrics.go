@@ -22,6 +22,8 @@ type Metrics struct {
 	outboxPublishAttemptsTotal       *prometheus.CounterVec
 	outboxPublishFailuresTotal       *prometheus.CounterVec
 	outboxEventsPublishedTotal       *prometheus.CounterVec
+	outboxPendingEvents              prometheus.Gauge
+	outboxPublishLag                 prometheus.Gauge
 	rateLimitAllowedTotal            prometheus.Counter
 	rateLimitRejectedTotal           prometheus.Counter
 	rateLimitRedisErrorsTotal        prometheus.Counter
@@ -104,6 +106,18 @@ func New() *Metrics {
 		},
 		[]string{"publisher"},
 	)
+	outboxPendingEvents := prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "paycore_outbox_pending_events",
+			Help: "Current number of publishable pending outbox events.",
+		},
+	)
+	outboxPublishLag := prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "paycore_outbox_publish_lag_seconds",
+			Help: "Age in seconds of the oldest publishable pending outbox event.",
+		},
+	)
 	rateLimitAllowedTotal := prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Name: "paycore_rate_limit_allowed_total",
@@ -168,6 +182,8 @@ func New() *Metrics {
 		outboxPublishAttemptsTotal,
 		outboxPublishFailuresTotal,
 		outboxEventsPublishedTotal,
+		outboxPendingEvents,
+		outboxPublishLag,
 		rateLimitAllowedTotal,
 		rateLimitRejectedTotal,
 		rateLimitRedisErrorsTotal,
@@ -190,6 +206,8 @@ func New() *Metrics {
 		outboxPublishAttemptsTotal:       outboxPublishAttemptsTotal,
 		outboxPublishFailuresTotal:       outboxPublishFailuresTotal,
 		outboxEventsPublishedTotal:       outboxEventsPublishedTotal,
+		outboxPendingEvents:              outboxPendingEvents,
+		outboxPublishLag:                 outboxPublishLag,
 		rateLimitAllowedTotal:            rateLimitAllowedTotal,
 		rateLimitRejectedTotal:           rateLimitRejectedTotal,
 		rateLimitRedisErrorsTotal:        rateLimitRedisErrorsTotal,
@@ -246,6 +264,11 @@ func (m *Metrics) ObserveOutboxBatch(publisher string, claimed int, published in
 	if failed > 0 {
 		m.outboxPublishFailuresTotal.WithLabelValues(publisher).Add(float64(failed))
 	}
+}
+
+func (m *Metrics) ObserveOutboxStats(pendingEvents int, publishLag time.Duration) {
+	m.outboxPendingEvents.Set(float64(pendingEvents))
+	m.outboxPublishLag.Set(publishLag.Seconds())
 }
 
 func (m *Metrics) ObserveRateLimit(result string, duration time.Duration) {

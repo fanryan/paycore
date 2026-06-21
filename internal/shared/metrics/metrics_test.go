@@ -34,6 +34,7 @@ func TestMetricsExposeOutboxCollectors(t *testing.T) {
 	appMetrics := metrics.New()
 
 	appMetrics.ObserveOutboxBatch("kafka", 3, 2, 1)
+	appMetrics.ObserveOutboxStats(7, 45*time.Second)
 
 	body := gatherMetrics(t, appMetrics)
 	expectedMetrics := []string{
@@ -41,6 +42,8 @@ func TestMetricsExposeOutboxCollectors(t *testing.T) {
 		`paycore_outbox_publish_attempts_total{publisher="kafka"} 3`,
 		`paycore_outbox_publish_failures_total{publisher="kafka"} 1`,
 		`paycore_outbox_events_published_total{publisher="kafka"} 2`,
+		"paycore_outbox_pending_events 7",
+		"paycore_outbox_publish_lag_seconds 45",
 	}
 
 	for _, expected := range expectedMetrics {

@@ -554,6 +554,10 @@ func (r *fakeOutboxRepository) MarkEventFailed(ctx context.Context, input outbox
 	return outbox.Event{}, errors.New("not implemented")
 }
 
+func (r *fakeOutboxRepository) Stats(ctx context.Context, input outbox.StatsInput) (outbox.Stats, error) {
+	return outbox.Stats{}, errors.New("not implemented")
+}
+
 type fakeMetricsRecorder struct {
 	batches          []fakeSettlementBatchMetric
 	recoveredBatches int

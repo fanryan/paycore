@@ -27,6 +27,8 @@ This document explains the current PayCore Prometheus metrics implementation as 
   - `paycore_outbox_publish_attempts_total{publisher}`
   - `paycore_outbox_publish_failures_total{publisher}`
   - `paycore_outbox_events_published_total{publisher}`
+  - `paycore_outbox_pending_events`
+  - `paycore_outbox_publish_lag_seconds`
 - Rate-limit metrics:
   - `paycore_rate_limit_allowed_total`
   - `paycore_rate_limit_rejected_total`
@@ -51,8 +53,6 @@ This document explains the current PayCore Prometheus metrics implementation as 
 ### Not Implemented Yet
 
 - Grafana dashboards.
-- Outbox pending-event gauge.
-- Outbox publish lag gauge.
 - Payment authorization/capture metrics.
 - Payer optimistic-lock conflict metrics.
 
@@ -219,6 +219,7 @@ The outbox worker records metrics after each processed batch:
 2. Publish each event.
 3. Mark each event published or failed.
 4. Record claimed, attempted, published, and failed counts.
+5. Record current publishable pending events and oldest-event lag.
 
 ### Settlement Worker
 
@@ -317,5 +318,5 @@ Defines local scrape targets for host-run PayCore processes.
 - [x] Add scrape configuration.
 - [x] Add Redis rate-limit metrics.
 - [x] Add Redis idempotency cache metrics.
-- [ ] Add outbox lag metrics.
+- [x] Add outbox lag metrics.
 - [ ] Add dashboards or dashboard screenshots.

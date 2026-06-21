@@ -231,6 +231,37 @@ func TestRepositoryClaimPendingEventsRollsBack(t *testing.T) {
 	}
 }
 
+func TestRepositoryReturnsOutboxStats(t *testing.T) {
+	ctx := context.Background()
+	pool := newTestPool(t)
+	store := outboxpostgres.NewStore(pool)
+	prefix := testPrefix()
+	t.Cleanup(func() {
+		cleanupOutboxEvents(t, pool, prefix)
+	})
+
+	now := testNow()
+	oldest := testEventAt(t, prefix+"-payment-oldest", "payment.authorized", now.Add(-3*time.Minute), now.Add(-5*time.Minute))
+	newer := testEventAt(t, prefix+"-payment-newer", "payment.authorized", now.Add(-time.Minute), now.Add(-2*time.Minute))
+	future := testEventAt(t, prefix+"-payment-future", "payment.authorized", now.Add(time.Minute), now)
+	createEvents(t, store, oldest, newer, future)
+
+	stats, err := store.Stats(ctx, outbox.StatsInput{
+		Now: now,
+	})
+	if err != nil {
+		t.Fatalf("expected stats to succeed, got error: %v", err)
+	}
+
+	if stats.PendingEvents != 2 {
+		t.Fatalf("expected 2 pending events, got %d", stats.PendingEvents)
+	}
+
+	if stats.PublishLag != 3*time.Minute {
+		t.Fatalf("expected publish lag 3m, got %s", stats.PublishLag)
+	}
+}
+
 func TestRepositoryMarksEventPublished(t *testing.T) {
 	ctx := context.Background()
 	pool := newTestPool(t)
