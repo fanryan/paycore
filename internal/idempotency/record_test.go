@@ -34,6 +34,14 @@ func TestNewRecordCreatesInProgressRecord(t *testing.T) {
 		t.Fatalf("expected status IN_PROGRESS, got %q", record.Status)
 	}
 
+	if record.ResponseBody == nil {
+		t.Fatal("expected response body to default to an empty slice")
+	}
+
+	if len(record.ResponseBody) != 0 {
+		t.Fatalf("expected empty response body, got %q", record.ResponseBody)
+	}
+
 	if !record.CreatedAt.Equal(now) {
 		t.Fatalf("expected created at %s, got %s", now, record.CreatedAt)
 	}

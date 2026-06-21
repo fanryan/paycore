@@ -70,6 +70,7 @@ Current development stage:
 - Central HTTP router migrated to chi for path parameters and feature route composition
 - Docker Compose local PostgreSQL, Redis, and Kafka infrastructure added
 - `.env.example` added for local runtime configuration
+- k6 payment happy-path load test added for merchant creation, payer creation, authorization, and capture
 - HTTP API foundation and middleware tests added
 - Configuration tests added
 - Merchant and payer unit tests added
@@ -92,7 +93,7 @@ POST /payments/authorize
 POST /payments/{payment_id}/capture
 ```
 
-Runtime wiring to PostgreSQL repositories is available through `PAYCORE_REPOSITORY_BACKEND=postgres`. Memory repositories remain the default. Redis-backed rate limiting, Redis-backed idempotency response caching, and Kafka-backed outbox publishing are implemented but opt-in. Settlement domain, schema, repository, service, one-shot worker, and stale batch recovery are implemented. Prometheus metrics are exposed by the API and workers, but Prometheus Docker Compose scraping and dashboards are not implemented yet. Settlement HTTP APIs have not been implemented yet.
+Runtime wiring to PostgreSQL repositories is available through `PAYCORE_REPOSITORY_BACKEND=postgres`. Memory repositories remain the default. Redis-backed rate limiting, Redis-backed idempotency response caching, and Kafka-backed outbox publishing are implemented but opt-in. Settlement domain, schema, repository, service, one-shot worker, and stale batch recovery are implemented. Prometheus metrics are exposed by the API and workers, and local Prometheus scraping is configured through Docker Compose. Grafana dashboards and settlement HTTP APIs have not been implemented yet.
 
 Payment authorization and capture enforce `Idempotency-Key`. In memory mode, idempotency records are process-local. In Postgres mode, merchant, payer, payment, hold, idempotency, and outbox records use PostgreSQL repositories. Payment authorization and capture business mutations plus outbox event creation run through a service-level transaction boundary in Postgres mode. Redis-backed rate limiting fails closed if Redis is unavailable. Redis-backed idempotency caching falls back to durable records if Redis is unavailable.
 
@@ -354,6 +355,20 @@ PAYCORE_KAFKA_BROKERS=localhost:9092 \
 go test ./internal/outbox
 ```
 
+To run the k6 payment happy-path load test:
+
+```bash
+PAYCORE_REPOSITORY_BACKEND=postgres \
+PAYCORE_DATABASE_URL='postgres://paycore:paycore@localhost:5432/paycore?sslmode=disable' \
+go run ./cmd/paycore-api
+```
+
+In another terminal:
+
+```bash
+k6 run loadtest/payment_happy_path.js
+```
+
 ## Current Repository Structure
 
 ```text
@@ -565,6 +580,7 @@ Current documentation:
 
 - `docs/architecture.md`
 - `docs/idempotency.md`
+- `docs/load-testing.md`
 - `docs/local-infrastructure.md`
 - `docs/merchant.md`
 - `docs/payer.md`

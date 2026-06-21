@@ -58,12 +58,13 @@ func NewRecord(input NewRecordInput) (Record, error) {
 	}
 
 	return Record{
-		Key:         key,
-		RequestHash: requestHash,
-		Status:      StatusInProgress,
-		CreatedAt:   now,
-		UpdatedAt:   now,
-		ExpiresAt:   now.Add(ttl),
+		Key:          key,
+		RequestHash:  requestHash,
+		Status:       StatusInProgress,
+		ResponseBody: []byte{},
+		CreatedAt:    now,
+		UpdatedAt:    now,
+		ExpiresAt:    now.Add(ttl),
 	}, nil
 }
 
